@@ -15,14 +15,12 @@ import {
   Info,
   MoreHorizontal,
   NotebookPen,
-  Pause,
   PencilLine,
   Play,
   Plus,
   RotateCcw,
   Search,
-  Settings2,
-  Sparkles,
+  SlidersHorizontal,
   Star,
   Trash2,
   Upload,
@@ -32,14 +30,23 @@ import {
 import { HashRouter, NavLink, Route, Routes, useLocation, useNavigate, useParams } from 'react-router-dom'
 import { db, clearAllData, defaultProfile, loadSnapshot, saveProfile } from './db'
 import { exerciseGroups, exercises as systemExercises } from './data/exercises'
+import { systemTemplates } from './data/templates'
+import { calculateBmi, formatLocalizedNumber, isSetValid, kgToLb, lbToKg, parseLocalizedNumber } from './domain'
+import { ExerciseVisual } from './components/ExerciseVisual'
 import { exerciseProgress, thisMonthCount, totalCompletedSets, workoutDurationMinutes } from './stats'
-import type { AppSnapshot, Exercise, Feeling, Profile, TimelineEntry, Workout, WorkoutItem, WorkoutSet } from './types'
+import type { ActivityCategory, AppSnapshot, Exercise, Feeling, MetricMode, Profile, TimelineEntry, Workout, WorkoutItem, WorkoutSet, WorkoutTemplate } from './types'
 
 const makeId = () => crypto.randomUUID()
 const formatDay = (value: string) => new Intl.DateTimeFormat('pt-BR', { day: '2-digit', month: 'short' }).format(new Date(value)).replace('.', '')
 const formatLongDate = (value: string) => new Intl.DateTimeFormat('pt-BR', { weekday: 'long', day: 'numeric', month: 'long' }).format(new Date(value))
 const formatTime = (value: string) => new Intl.DateTimeFormat('pt-BR', { hour: '2-digit', minute: '2-digit' }).format(new Date(value))
-const emptySnapshot: AppSnapshot = { workouts: [], timeline: [], favorites: [], customExercises: [], profile: defaultProfile }
+const emptySnapshot: AppSnapshot = { workouts: [], timeline: [], favorites: [], customExercises: [], customTemplates: [], profile: defaultProfile }
+const INSTALL_SNOOZE_KEY = 'tg-install-snoozed-until'
+
+interface BeforeInstallPromptEvent extends Event {
+  prompt: () => Promise<void>
+  userChoice: Promise<{ outcome: 'accepted' | 'dismissed' }>
+}
 
 function App() {
   return (
@@ -54,6 +61,9 @@ function AppContent() {
   const [loading, setLoading] = useState(true)
   const [notice, setNotice] = useState('')
   const [updateReady, setUpdateReady] = useState(false)
+  const [installPrompt, setInstallPrompt] = useState<BeforeInstallPromptEvent>()
+  const [showInstall, setShowInstall] = useState(false)
+  const [showIosHelp, setShowIosHelp] = useState(false)
   const location = useLocation()
 
   const refresh = async () => {
@@ -69,14 +79,41 @@ function AppContent() {
   }, [])
 
   useEffect(() => {
+    const iosNavigator = navigator as Navigator & { standalone?: boolean }
+    const standalone = window.matchMedia('(display-mode: standalone)').matches || Boolean(iosNavigator.standalone)
+    if (standalone) return
+    const canShow = () => Date.now() >= Number(localStorage.getItem(INSTALL_SNOOZE_KEY) ?? 0)
+    const onPrompt = (event: Event) => {
+      event.preventDefault()
+      setInstallPrompt(event as BeforeInstallPromptEvent)
+      if (canShow()) setShowInstall(true)
+    }
+    const onInstalled = () => { setShowInstall(false); localStorage.removeItem(INSTALL_SNOOZE_KEY) }
+    window.addEventListener('beforeinstallprompt', onPrompt)
+    window.addEventListener('appinstalled', onInstalled)
+    const isIos = /iphone|ipad|ipod/i.test(navigator.userAgent)
+    const timer = isIos && canShow() ? window.setTimeout(() => setShowInstall(true), 1400) : undefined
+    return () => {
+      window.removeEventListener('beforeinstallprompt', onPrompt)
+      window.removeEventListener('appinstalled', onInstalled)
+      if (timer) window.clearTimeout(timer)
+    }
+  }, [])
+
+  useEffect(() => {
     if (!notice) return
     const timer = window.setTimeout(() => setNotice(''), 3200)
     return () => window.clearTimeout(timer)
   }, [notice])
 
+  useEffect(() => {
+    window.scrollTo(0, 0)
+  }, [location.pathname])
+
   const activeWorkout = data.workouts.find((workout) => workout.status === 'active')
   const showNav = !location.pathname.startsWith('/treino/ativo')
   const allExercises = useMemo(() => [...systemExercises, ...data.customExercises], [data.customExercises])
+  const allTemplates = useMemo(() => [...systemTemplates, ...data.customTemplates], [data.customTemplates])
 
   if (loading) {
     return <main className="loading-screen"><span className="brand-mark">tg</span><p>Abrindo seu diário…</p></main>
@@ -86,7 +123,7 @@ function AppContent() {
     return <Onboarding profile={data.profile} onDone={async (profile) => { await saveProfile(profile); await refresh() }} />
   }
 
-  const shared = { data, refresh, setNotice, allExercises }
+  const shared = { data, refresh, setNotice, allExercises, allTemplates }
 
   return (
     <div className="app-shell">
@@ -103,6 +140,19 @@ function AppContent() {
           <span>continuar <ChevronRight size={17} /></span>
         </NavLink>
       )}
+      {showInstall && <aside className={`install-nudge ${showNav ? '' : 'during-workout'}`} aria-label="Instalar aplicativo">
+        <div className="install-mark">tg</div>
+        <div><strong>levar o diário com você</strong><p>{showIosHelp ? 'No Safari, toque em Compartilhar e depois em “Adicionar à Tela de Início”.' : 'Instale para abrir rápido e usar offline.'}</p></div>
+        {!showIosHelp && <button className="install-action" onClick={async () => {
+          if (!installPrompt) { setShowIosHelp(true); return }
+          await installPrompt.prompt()
+          const choice = await installPrompt.userChoice
+          setInstallPrompt(undefined)
+          if (choice.outcome === 'accepted') setShowInstall(false)
+          else { localStorage.setItem(INSTALL_SNOOZE_KEY, String(Date.now() + 24 * 60 * 60 * 1000)); setShowInstall(false) }
+        }}>instalar</button>}
+        <button className="install-later" onClick={() => { localStorage.setItem(INSTALL_SNOOZE_KEY, String(Date.now() + 24 * 60 * 60 * 1000)); setShowInstall(false) }}>lembrar mais tarde</button>
+      </aside>}
       <main id="conteudo" className={showNav ? 'page-area with-nav' : 'page-area'}>
         <Routes>
           <Route path="/" element={<TodayPage {...shared} />} />
@@ -127,6 +177,7 @@ type SharedProps = {
   refresh: () => Promise<void>
   setNotice: (message: string) => void
   allExercises: Exercise[]
+  allTemplates: WorkoutTemplate[]
 }
 
 function Onboarding({ profile, onDone }: { profile: Profile; onDone: (profile: Profile) => Promise<void> }) {
@@ -158,7 +209,7 @@ function PageHeader({ eyebrow, title, action }: { eyebrow?: string; title: strin
   return <header className="page-header"><div>{eyebrow && <p className="eyebrow">{eyebrow}</p>}<h1>{title}</h1></div>{action}</header>
 }
 
-function TodayPage({ data, refresh, setNotice }: SharedProps) {
+function TodayPage({ data, refresh, allExercises, allTemplates }: SharedProps) {
   const navigate = useNavigate()
   const completed = data.workouts.filter((workout) => workout.status === 'completed')
   const active = data.workouts.find((workout) => workout.status === 'active')
@@ -166,17 +217,19 @@ function TodayPage({ data, refresh, setNotice }: SharedProps) {
   const greeting = hour < 12 ? 'bom dia' : hour < 18 ? 'boa tarde' : 'boa noite'
   const monthCount = thisMonthCount(data.workouts)
 
-  const startWorkout = async (repeat?: Workout) => {
+  const startWorkout = async (repeat?: Workout, template?: WorkoutTemplate) => {
     if (active) return navigate('/treino/ativo')
+    const templateItems = template?.exerciseIds.map((exerciseId) => allExercises.find((exercise) => exercise.id === exerciseId)).filter((exercise): exercise is Exercise => Boolean(exercise))
     const workout: Workout = {
       id: makeId(),
-      title: repeat?.title ?? 'Treino de hoje',
+      title: repeat?.title ?? template?.name ?? 'Treino de hoje',
       status: 'active',
       startedAt: new Date().toISOString(),
+      restSeconds: repeat?.restSeconds ?? 90,
       items: repeat?.items.map((item) => ({
-        id: makeId(), exerciseId: item.exerciseId, exerciseName: item.exerciseName,
+        id: makeId(), exerciseId: item.exerciseId, exerciseName: item.exerciseName, category: item.category, metricMode: item.metricMode,
         sets: [{ id: makeId(), completed: false }],
-      })) ?? [],
+      })) ?? templateItems?.map((exercise) => ({ id: makeId(), exerciseId: exercise.id, exerciseName: exercise.name, category: exercise.category, metricMode: exercise.metricMode, sets: [{ id: makeId(), completed: false }] })) ?? [],
     }
     await db.workouts.put(workout)
     await refresh()
@@ -196,11 +249,16 @@ function TodayPage({ data, refresh, setNotice }: SharedProps) {
       </section>
       {completed[0] && !active && <button className="quiet-action" onClick={() => void startWorkout(completed[0])}><RotateCcw size={17} /> repetir o último treino</button>}
 
+      {!active && <section className="template-shortcuts" aria-labelledby="template-shortcuts-title">
+        <div className="section-heading"><div><p className="eyebrow">para começar mais rápido</p><h2 id="template-shortcuts-title">modelos de treino</h2></div><NavLink to="/exercicios">ver todos</NavLink></div>
+        <div className="template-scroll">{allTemplates.slice(0, 4).map((template) => <button key={template.id} onClick={() => void startWorkout(undefined, template)}><strong>{template.name}</strong><small>{template.note}</small><Play size={16} /></button>)}</div>
+      </section>}
+
       <section className="at-a-glance" aria-labelledby="glance-title">
         <div className="section-heading"><div><p className="eyebrow">um olhar rápido</p><h2 id="glance-title">seu ritmo</h2></div><span className="hand-line" /></div>
         <div className="glance-grid">
           <div><strong>{monthCount}</strong><span>{monthCount === 1 ? 'treino este mês' : 'treinos este mês'}</span></div>
-          <div><strong>{totalCompletedSets(data.workouts)}</strong><span>séries registradas</span></div>
+          <div><strong>{totalCompletedSets(data.workouts)}</strong><span>registros concluídos</span></div>
         </div>
       </section>
 
@@ -211,7 +269,7 @@ function TodayPage({ data, refresh, setNotice }: SharedProps) {
         ) : completed.slice(0, 3).map((workout) => (
           <NavLink className="workout-row" to={`/treino/${workout.id}`} key={workout.id}>
             <span className="workout-date">{formatDay(workout.endedAt ?? workout.startedAt)}</span>
-            <span><strong>{workout.title}</strong><small>{workout.items.length} exercícios · {workoutDurationMinutes(workout)} min</small></span>
+            <span><strong>{workout.title}</strong><small>{workout.items.length} {workout.items.length === 1 ? 'atividade' : 'atividades'} · {workoutDurationMinutes(workout)} min</small></span>
             <ChevronRight size={18} />
           </NavLink>
         ))}
@@ -228,6 +286,8 @@ function WorkoutPage({ data, refresh, setNotice, allExercises }: SharedProps) {
   const [query, setQuery] = useState('')
   const [seconds, setSeconds] = useState(0)
   const [feeling, setFeeling] = useState<Feeling | undefined>()
+  const [section, setSection] = useState<'strength' | 'activities'>('strength')
+  const [restOpen, setRestOpen] = useState(false)
 
   useEffect(() => {
     if (seconds <= 0) return
@@ -239,30 +299,43 @@ function WorkoutPage({ data, refresh, setNotice, allExercises }: SharedProps) {
 
   const persist = async (next: Workout) => { await db.workouts.put(next); await refresh() }
   const updateItem = async (itemId: string, fn: (item: WorkoutItem) => WorkoutItem) => {
-    await persist({ ...active, items: active.items.map((item) => item.id === itemId ? fn(item) : item) })
+    const latest = await db.workouts.get(active.id) ?? active
+    await db.workouts.put({ ...latest, items: latest.items.map((item) => item.id === itemId ? fn(item) : item) })
+    await refresh()
   }
   const addExercise = async (exercise: Exercise) => {
-    const item: WorkoutItem = { id: makeId(), exerciseId: exercise.id, exerciseName: exercise.name, sets: [{ id: makeId(), completed: false }] }
-    await persist({ ...active, items: [...active.items, item] })
+    const item: WorkoutItem = { id: makeId(), exerciseId: exercise.id, exerciseName: exercise.name, category: exercise.category, metricMode: exercise.metricMode, sets: [{ id: makeId(), completed: false }] }
+    const latest = await db.workouts.get(active.id) ?? active
+    await persist({ ...latest, items: [...latest.items, item] })
     setPickerOpen(false); setQuery('')
   }
   const updateSet = async (itemId: string, setId: string, patch: Partial<WorkoutSet>) => {
     await updateItem(itemId, (item) => ({ ...item, sets: item.sets.map((set) => set.id === setId ? { ...set, ...patch } : set) }))
   }
   const completeSet = async (itemId: string, set: WorkoutSet) => {
-    await updateSet(itemId, set.id, { completed: !set.completed })
-    if (!set.completed) setSeconds(90)
+    const latestWorkout = await db.workouts.get(active.id) ?? active
+    const item = latestWorkout.items.find((row) => row.id === itemId)
+    const latestSet = item?.sets.find((row) => row.id === set.id)
+    if (!item || !latestSet) return
+    if (!latestSet.completed && !isSetValid(latestSet, item.metricMode)) {
+      setNotice(item.category === 'strength' ? 'Preencha os valores obrigatórios acima de zero.' : 'Preencha os dados da atividade acima de zero.')
+      return
+    }
+    await db.workouts.put({ ...latestWorkout, items: latestWorkout.items.map((row) => row.id === itemId ? { ...row, sets: row.sets.map((entry) => entry.id === latestSet.id ? { ...entry, completed: !entry.completed } : entry) } : row) })
+    await refresh()
+    if (!latestSet.completed && item.category === 'strength') setSeconds(latestWorkout.restSeconds ?? 90)
   }
   const finish = async () => {
     const hasSet = active.items.some((item) => item.sets.some((set) => set.completed))
-    if (!hasSet) { setNotice('Conclua ao menos uma série antes de finalizar.'); return }
+    if (!hasSet) { setNotice('Conclua ao menos uma série ou registro antes de finalizar.'); return }
     const endedAt = new Date().toISOString()
     const completedWorkout = { ...active, status: 'completed' as const, endedAt, feeling }
     const exerciseCount = active.items.length
     const setCount = active.items.reduce((sum, item) => sum + item.sets.filter((set) => set.completed).length, 0)
+    const includesActivities = active.items.some((item) => item.category !== 'strength')
     const entry: TimelineEntry = {
       id: makeId(), kind: 'workout', occurredAt: endedAt, title: active.title,
-      text: `${exerciseCount} ${exerciseCount === 1 ? 'exercício' : 'exercícios'} · ${setCount} ${setCount === 1 ? 'série' : 'séries'}`,
+      text: `${exerciseCount} ${exerciseCount === 1 ? 'atividade' : 'atividades'} · ${setCount} ${includesActivities ? (setCount === 1 ? 'registro' : 'registros') : (setCount === 1 ? 'série' : 'séries')}`,
       sourceId: active.id, isMilestone: false,
     }
     await db.transaction('rw', [db.workouts, db.timeline], async () => { await db.workouts.put(completedWorkout); await db.timeline.put(entry) })
@@ -272,8 +345,14 @@ function WorkoutPage({ data, refresh, setNotice, allExercises }: SharedProps) {
     if (!window.confirm('Apagar este treino em andamento? As séries registradas serão removidas.')) return
     await db.workouts.delete(active.id); await refresh(); navigate('/')
   }
-  const filtered = allExercises.filter((exercise) => `${exercise.name} ${exercise.aliases.join(' ')}`.toLocaleLowerCase().includes(query.toLocaleLowerCase())).slice(0, 14)
+  const filtered = allExercises.filter((exercise) => {
+    const inSection = section === 'strength' ? exercise.category === 'strength' : exercise.category !== 'strength'
+    return inSection && `${exercise.name} ${exercise.aliases.join(' ')}`.toLocaleLowerCase().includes(query.toLocaleLowerCase())
+  }).slice(0, 14)
   const elapsed = Math.max(0, Math.floor((Date.now() - new Date(active.startedAt).getTime()) / 60000))
+  const visibleItems = active.items.filter((item) => section === 'strength' ? item.category === 'strength' : item.category !== 'strength')
+  const strengthCount = active.items.filter((item) => item.category === 'strength').length
+  const activityCount = active.items.length - strengthCount
 
   return (
     <div className="workout-page">
@@ -287,27 +366,34 @@ function WorkoutPage({ data, refresh, setNotice, allExercises }: SharedProps) {
         <span className="pink-swoop" />
       </div>
 
-      {active.items.length === 0 ? (
-        <div className="workout-empty"><div className="soft-orbit"><Plus size={28} /></div><h2>Qual foi o primeiro?</h2><p>Adicione um exercício para começar a registrar.</p></div>
-      ) : active.items.map((item, itemIndex) => (
+      <div className="workout-sections" role="tablist" aria-label="Tipo de atividade">
+        <button role="tab" aria-selected={section === 'strength'} className={section === 'strength' ? 'selected' : ''} onClick={() => { setSection('strength'); setQuery('') }}><Dumbbell size={17} /><span>musculação</span><small>{strengthCount}</small></button>
+        <button role="tab" aria-selected={section === 'activities'} className={section === 'activities' ? 'selected' : ''} onClick={() => { setSection('activities'); setQuery('') }}><Clock3 size={17} /><span>cardio e outras</span><small>{activityCount}</small></button>
+      </div>
+
+      {section === 'strength' && <div className="rest-preference"><button onClick={() => setRestOpen(!restOpen)} aria-expanded={restOpen}><Clock3 size={16} /> descanso {formatTimer(active.restSeconds ?? 90)} <SlidersHorizontal size={15} /></button>{restOpen && <div className="rest-options" aria-label="Tempo de descanso">{[45, 60, 90, 120, 180].map((value) => <button className={(active.restSeconds ?? 90) === value ? 'selected' : ''} key={value} onClick={() => void persist({ ...active, restSeconds: value })}>{formatTimer(value)}</button>)}</div>}</div>}
+
+      {visibleItems.length === 0 ? (
+        <div className="workout-empty"><div className="soft-orbit"><Plus size={28} /></div><h2>{section === 'strength' ? 'Qual foi o primeiro?' : 'Algum cardio ou atividade?'}</h2><p>{section === 'strength' ? 'Adicione um exercício para começar a registrar.' : 'Tempo e distância ficam separados da musculação.'}</p></div>
+      ) : visibleItems.map((item, itemIndex) => (
         <section className="exercise-block" key={item.id} aria-labelledby={`exercise-${item.id}`}>
           <div className="exercise-block-title"><span>{String(itemIndex + 1).padStart(2, '0')}</span><h2 id={`exercise-${item.id}`}>{item.exerciseName}</h2><button className="icon-button small" aria-label={`Remover ${item.exerciseName}`} onClick={() => void persist({ ...active, items: active.items.filter((row) => row.id !== item.id) })}><X /></button></div>
-          <div className="set-head"><span>série</span><span>carga ({data.profile.loadUnit})</span><span>reps</span><span>feito</span></div>
+          <div className="set-head"><span>{item.category === 'strength' ? 'série' : 'reg.'}</span><MetricLabels mode={item.metricMode} unit={data.profile.loadUnit} /><span>feito</span><span aria-hidden="true" /></div>
           {item.sets.map((set, setIndex) => (
             <div className={set.completed ? 'set-row completed' : 'set-row'} key={set.id}>
               <span className="set-number">{setIndex + 1}</span>
-              <input inputMode="decimal" aria-label={`Carga da série ${setIndex + 1}`} value={set.load ?? ''} placeholder="—" onChange={(event) => void updateSet(item.id, set.id, { load: event.target.value ? Number(event.target.value) : undefined })} />
-              <input inputMode="numeric" aria-label={`Repetições da série ${setIndex + 1}`} value={set.reps ?? ''} placeholder="—" onChange={(event) => void updateSet(item.id, set.id, { reps: event.target.value ? Number(event.target.value) : undefined })} />
-              <button className="set-check" aria-label={set.completed ? `Reabrir série ${setIndex + 1}` : `Concluir série ${setIndex + 1}`} aria-pressed={set.completed} onClick={() => void completeSet(item.id, set)}>{set.completed && <Check size={19} />}</button>
+              <MetricFields mode={item.metricMode} unit={data.profile.loadUnit} set={set} index={setIndex} onCommit={(patch) => void updateSet(item.id, set.id, patch)} />
+              <button className="set-check" aria-label={set.completed ? `Reabrir ${item.category === 'strength' ? 'série' : 'registro'} ${setIndex + 1}` : `Concluir ${item.category === 'strength' ? 'série' : 'registro'} ${setIndex + 1}`} aria-pressed={set.completed} onClick={() => void completeSet(item.id, set)}>{set.completed && <Check size={19} />}</button>
+              <button className="remove-set" aria-label={`Excluir ${item.category === 'strength' ? 'série' : 'registro'} ${setIndex + 1}`} onClick={() => void updateItem(item.id, (row) => ({ ...row, sets: row.sets.filter((entry) => entry.id !== set.id) }))}><Trash2 size={16} /></button>
             </div>
           ))}
-          <button className="add-set" onClick={() => void updateItem(item.id, (row) => ({ ...row, sets: [...row.sets, { id: makeId(), completed: false, load: row.sets.at(-1)?.load, reps: row.sets.at(-1)?.reps }] }))}><Plus size={17} /> adicionar série</button>
+          <button className="add-set" onClick={() => void updateItem(item.id, (row) => ({ ...row, sets: [...row.sets, { ...row.sets.at(-1), id: makeId(), completed: false }] }))}><Plus size={17} /> adicionar {item.category === 'strength' ? 'série' : 'registro'}</button>
           <input className="note-input" aria-label={`Observação sobre ${item.exerciseName}`} placeholder="uma observação, se quiser…" value={item.note ?? ''} onChange={(event) => void updateItem(item.id, (row) => ({ ...row, note: event.target.value }))} />
         </section>
       ))}
 
-      <button className="add-exercise-button" onClick={() => setPickerOpen(true)}><CirclePlus size={20} /> adicionar exercício</button>
-      {seconds > 0 && <div className="rest-timer"><Clock3 size={18} /><span>descanso</span><strong>{Math.floor(seconds / 60)}:{String(seconds % 60).padStart(2, '0')}</strong><button onClick={() => setSeconds(0)}><X size={17} /> pular</button></div>}
+      <button className="add-exercise-button" onClick={() => setPickerOpen(true)}><CirclePlus size={20} /> adicionar {section === 'strength' ? 'exercício' : 'atividade'}</button>
+      {seconds > 0 && <div className="rest-timer"><Clock3 size={18} /><span>descanso</span><button aria-label="Diminuir descanso em 15 segundos" onClick={() => setSeconds((value) => Math.max(15, value - 15))}>−15</button><strong>{formatTimer(seconds)}</strong><button aria-label="Aumentar descanso em 15 segundos" onClick={() => setSeconds((value) => value + 15)}>+15</button><button aria-label="Encerrar descanso" onClick={() => setSeconds(0)}><X size={17} /></button></div>}
       <section className="finish-area">
         <p>como foi hoje? <span>opcional</span></p>
         <div className="feeling-row">
@@ -316,30 +402,82 @@ function WorkoutPage({ data, refresh, setNotice, allExercises }: SharedProps) {
         <button className="primary-button wide" onClick={() => void finish()}><Check size={19} /> finalizar treino</button>
       </section>
 
-      {pickerOpen && <div className="sheet-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) setPickerOpen(false) }}><section className="bottom-sheet" role="dialog" aria-modal="true" aria-labelledby="picker-title"><div className="sheet-handle" /><header><h2 id="picker-title">adicionar exercício</h2><button className="icon-button" aria-label="Fechar" onClick={() => setPickerOpen(false)}><X /></button></header><label className="search-field"><Search size={19} /><input autoFocus placeholder="buscar exercício" value={query} onChange={(event) => setQuery(event.target.value)} /></label><div className="picker-list">{filtered.map((exercise) => <button key={exercise.id} onClick={() => void addExercise(exercise)}><span><strong>{exercise.name}</strong><small>{exercise.group} · {exercise.equipment}</small></span><Plus size={19} /></button>)}</div></section></div>}
+      {pickerOpen && <div className="sheet-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) setPickerOpen(false) }}><section className="bottom-sheet" role="dialog" aria-modal="true" aria-labelledby="picker-title"><div className="sheet-handle" /><header><h2 id="picker-title">adicionar {section === 'strength' ? 'exercício' : 'atividade'}</h2><button className="icon-button" aria-label="Fechar" onClick={() => setPickerOpen(false)}><X /></button></header><label className="search-field"><Search size={19} /><input autoFocus placeholder={section === 'strength' ? 'buscar exercício' : 'buscar cardio ou atividade'} value={query} onChange={(event) => setQuery(event.target.value)} /></label><div className="picker-list">{filtered.map((exercise) => <button key={exercise.id} onClick={() => void addExercise(exercise)}><ExerciseVisual visual={exercise.visual} label={exercise.name} compact /><span><strong>{exercise.name}</strong><small>{exercise.group} · {exercise.equipment}</small></span><Plus size={19} /></button>)}</div></section></div>}
     </div>
   )
+}
+
+function MetricLabels({ mode, unit }: { mode: MetricMode; unit: Profile['loadUnit'] }) {
+  const labels = mode === 'load-reps' ? [`carga (${unit})`, 'reps'] : mode === 'distance-time' ? ['distância (km)', 'tempo (min)'] : mode === 'reps-only' ? ['repetições'] : ['tempo (min)']
+  return <span className={`metric-labels ${labels.length === 1 ? 'single' : ''}`}>{labels.map((label) => <span key={label}>{label}</span>)}</span>
+}
+
+function MetricFields({ mode, unit, set, index, onCommit }: { mode: MetricMode; unit: Profile['loadUnit']; set: WorkoutSet; index: number; onCommit: (patch: Partial<WorkoutSet>) => void }) {
+  const fields = mode === 'load-reps'
+    ? [{ key: 'load' as const, value: set.load, label: `Carga da série ${index + 1} em ${unit}` }, { key: 'reps' as const, value: set.reps, label: `Repetições da série ${index + 1}` }]
+    : mode === 'distance-time'
+      ? [{ key: 'distanceKm' as const, value: set.distanceKm, label: `Distância do registro ${index + 1} em quilômetros` }, { key: 'durationMinutes' as const, value: set.durationMinutes, label: `Tempo do registro ${index + 1} em minutos` }]
+      : mode === 'reps-only'
+        ? [{ key: 'reps' as const, value: set.reps, label: `Repetições da série ${index + 1}` }]
+        : [{ key: 'durationMinutes' as const, value: set.durationMinutes, label: `Tempo do registro ${index + 1} em minutos` }]
+  return <span className={`metric-inputs ${fields.length === 1 ? 'single' : ''}`}>{fields.map((field) => <LocalizedNumberInput key={field.key} value={field.value} label={field.label} onCommit={(value) => onCommit({ [field.key]: value })} />)}</span>
+}
+
+function LocalizedNumberInput({ value, label, onCommit }: { value?: number; label: string; onCommit: (value?: number) => void }) {
+  const [raw, setRaw] = useState(formatLocalizedNumber(value))
+  const [invalid, setInvalid] = useState(false)
+  useEffect(() => setRaw(formatLocalizedNumber(value)), [value])
+  const commit = () => {
+    if (!raw.trim()) { setInvalid(false); onCommit(undefined); return }
+    const parsed = parseLocalizedNumber(raw)
+    setInvalid(parsed === undefined)
+    if (parsed !== undefined) { setRaw(formatLocalizedNumber(parsed)); onCommit(parsed) } else onCommit(undefined)
+  }
+  return <span className="number-field"><input inputMode="decimal" aria-label={label} aria-invalid={invalid} value={raw} placeholder="—" onChange={(event) => { const next = event.target.value; const parsed = parseLocalizedNumber(next); setRaw(next); setInvalid(false); if (parsed !== undefined) onCommit(parsed); else if (!next.trim()) onCommit(undefined) }} onBlur={commit} /><small className="field-error">{invalid ? 'maior que 0' : ''}</small></span>
+}
+
+function formatTimer(value: number) {
+  return `${Math.floor(value / 60)}:${String(value % 60).padStart(2, '0')}`
 }
 
 function TimelinePage({ data, refresh, setNotice }: SharedProps) {
   const [composer, setComposer] = useState(false)
   const [note, setNote] = useState('')
   const [imageDataUrl, setImageDataUrl] = useState<string>()
+  const [photoBusy, setPhotoBusy] = useState(false)
   const [filter, setFilter] = useState<'all' | 'milestones'>('all')
   const visible = data.timeline.filter((entry) => filter === 'all' || entry.isMilestone)
 
   const choosePhoto = async (event: ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0]
     if (!file) return
-    if (!file.type.startsWith('image/')) { setNotice('Escolha uma imagem.'); return }
+    if (!file.type.startsWith('image/')) { setNotice('Escolha uma imagem compatível.'); return }
     if (file.size > 8_000_000) { setNotice('Essa foto é grande demais. Escolha uma de até 8 MB.'); return }
-    setImageDataUrl(await compressImage(file))
+    setPhotoBusy(true)
+    try {
+      const processed = await compressImage(file)
+      setImageDataUrl(processed)
+      setNotice('Foto pronta para guardar.')
+    } catch {
+      setImageDataUrl(undefined)
+      setNotice('Não conseguimos preparar esta foto. Tente JPG, PNG ou WebP.')
+    } finally {
+      setPhotoBusy(false)
+      event.target.value = ''
+    }
   }
   const saveEntry = async (event: FormEvent) => {
     event.preventDefault()
     if (!note.trim() && !imageDataUrl) return
     const entry: TimelineEntry = { id: makeId(), kind: imageDataUrl ? 'photo' : 'note', occurredAt: new Date().toISOString(), title: imageDataUrl ? 'Um registro de hoje' : 'Nota de hoje', text: note.trim(), imageDataUrl, isMilestone: false }
-    await db.timeline.put(entry); await refresh(); setNote(''); setImageDataUrl(undefined); setComposer(false); setNotice('Guardado na sua linha.')
+    try {
+      await db.timeline.put(entry)
+      const saved = await db.timeline.get(entry.id)
+      if (!saved || (imageDataUrl && !saved.imageDataUrl)) throw new Error('photo-not-persisted')
+      await refresh(); setNote(''); setImageDataUrl(undefined); setComposer(false); setNotice('Guardado na sua linha.')
+    } catch {
+      setNotice('Não conseguimos guardar a foto. Seu treino continua salvo.')
+    }
   }
 
   return (
@@ -351,7 +489,7 @@ function TimelinePage({ data, refresh, setNotice }: SharedProps) {
           {visible.map((entry) => <TimelineItem key={entry.id} entry={entry} refresh={refresh} setNotice={setNotice} />)}
         </div>
       )}
-      {composer && <div className="sheet-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) setComposer(false) }}><form className="bottom-sheet composer" onSubmit={(event) => void saveEntry(event)}><div className="sheet-handle" /><header><h2>guardar na linha</h2><button type="button" className="icon-button" aria-label="Fechar" onClick={() => setComposer(false)}><X /></button></header>{imageDataUrl && <img className="composer-preview" src={imageDataUrl} alt="Prévia da foto escolhida" />}<textarea autoFocus={!imageDataUrl} value={note} onChange={(event) => setNote(event.target.value)} placeholder="O que você quer lembrar?" aria-label="Anotação" /><div className="composer-actions"><label className="secondary-button file-button"><ImagePlus size={18} /> foto<input type="file" accept="image/*" onChange={(event) => void choosePhoto(event)} /></label><button className="primary-button" disabled={!note.trim() && !imageDataUrl}>guardar</button></div><p className="privacy-note"><Info size={15} /> A foto fica neste aparelho.</p></form></div>}
+      {composer && <div className="sheet-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) setComposer(false) }}><form className="bottom-sheet composer" onSubmit={(event) => void saveEntry(event)}><div className="sheet-handle" /><header><h2>guardar na linha</h2><button type="button" className="icon-button" aria-label="Fechar" onClick={() => setComposer(false)}><X /></button></header>{photoBusy && <div className="photo-processing" role="status">preparando sua foto…</div>}{imageDataUrl && <div className="photo-ready"><img className="composer-preview" src={imageDataUrl} alt="Prévia da foto escolhida" /><button type="button" aria-label="Remover foto escolhida" onClick={() => setImageDataUrl(undefined)}><X size={17} /></button></div>}<textarea autoFocus={!imageDataUrl} value={note} onChange={(event) => setNote(event.target.value)} placeholder="O que você quer lembrar?" aria-label="Anotação" /><div className="composer-actions"><label className="secondary-button file-button"><ImagePlus size={18} /> {imageDataUrl ? 'trocar foto' : 'foto'}<input type="file" accept="image/jpeg,image/png,image/webp,image/heic,image/heif" onChange={(event) => void choosePhoto(event)} /></label><button className="primary-button" disabled={photoBusy || (!note.trim() && !imageDataUrl)}>guardar</button></div><p className="privacy-note"><Info size={15} /> A foto fica neste aparelho.</p></form></div>}
     </div>
   )
 }
@@ -374,10 +512,12 @@ function TimelineItem({ entry, refresh, setNotice }: { entry: TimelineEntry; ref
   )
 }
 
-function ExercisesPage({ data, refresh, setNotice, allExercises }: SharedProps) {
+function ExercisesPage({ data, refresh, setNotice, allExercises, allTemplates }: SharedProps) {
   const [query, setQuery] = useState('')
   const [group, setGroup] = useState('Todos')
   const [creating, setCreating] = useState(false)
+  const [creatingTemplate, setCreatingTemplate] = useState(false)
+  const [librarySection, setLibrarySection] = useState<'exercises' | 'templates'>('exercises')
   const filtered = allExercises.filter((exercise) => (group === 'Todos' || exercise.group === group) && `${exercise.name} ${exercise.aliases.join(' ')}`.toLocaleLowerCase().includes(query.toLocaleLowerCase()))
   const toggleFavorite = async (id: string) => {
     if (data.favorites.includes(id)) await db.favorites.delete(id); else await db.favorites.put({ exerciseId: id })
@@ -385,12 +525,16 @@ function ExercisesPage({ data, refresh, setNotice, allExercises }: SharedProps) 
   }
   return (
     <div className="page exercises-page">
-      <PageHeader eyebrow="para consultar" title="exercícios" action={<button className="icon-button soft" aria-label="Criar exercício pessoal" onClick={() => setCreating(true)}><Plus /></button>} />
-      <label className="search-field prominent"><Search size={19} /><input placeholder="buscar pelo nome" value={query} onChange={(event) => setQuery(event.target.value)} /></label>
-      <div className="filter-row scrollable">{exerciseGroups.map((value) => <button key={value} className={group === value ? 'selected' : ''} onClick={() => setGroup(value)}>{value.toLocaleLowerCase()}</button>)}</div>
-      <p className="result-count">{filtered.length} {filtered.length === 1 ? 'exercício' : 'exercícios'}</p>
-      <div className="exercise-list">{filtered.map((exercise) => <div className="exercise-list-row" key={exercise.id}><NavLink to={`/exercicios/${exercise.id}`}><span className="exercise-glyph">{exercise.name.slice(0, 1).toLocaleLowerCase()}</span><span><strong>{exercise.name}</strong><small>{exercise.group} · {exercise.equipment}{exercise.origin === 'custom' ? ' · pessoal' : ''}</small></span></NavLink><button className="icon-button small" aria-label={data.favorites.includes(exercise.id) ? `Desfavoritar ${exercise.name}` : `Favoritar ${exercise.name}`} onClick={() => void toggleFavorite(exercise.id)}><Heart size={19} fill={data.favorites.includes(exercise.id) ? 'currentColor' : 'none'} /></button></div>)}</div>
+      <PageHeader eyebrow="para consultar e preparar" title="biblioteca" action={<button className="icon-button soft" aria-label={librarySection === 'exercises' ? 'Criar exercício pessoal' : 'Criar modelo de treino'} onClick={() => librarySection === 'exercises' ? setCreating(true) : setCreatingTemplate(true)}><Plus /></button>} />
+      <div className="library-tabs" role="tablist" aria-label="Conteúdo da biblioteca"><button role="tab" aria-selected={librarySection === 'exercises'} className={librarySection === 'exercises' ? 'selected' : ''} onClick={() => setLibrarySection('exercises')}>exercícios <small>{allExercises.length}</small></button><button role="tab" aria-selected={librarySection === 'templates'} className={librarySection === 'templates' ? 'selected' : ''} onClick={() => setLibrarySection('templates')}>modelos <small>{allTemplates.length}</small></button></div>
+      {librarySection === 'exercises' ? <>
+        <label className="search-field prominent"><Search size={19} /><input placeholder="buscar pelo nome" value={query} onChange={(event) => setQuery(event.target.value)} /></label>
+        <div className="filter-row scrollable">{exerciseGroups.map((value) => <button key={value} className={group === value ? 'selected' : ''} onClick={() => setGroup(value)}>{value.toLocaleLowerCase()}</button>)}</div>
+        <p className="result-count">{filtered.length} {filtered.length === 1 ? 'exercício' : 'exercícios'}</p>
+        <div className="exercise-list">{filtered.map((exercise) => <div className="exercise-list-row" key={exercise.id}><NavLink to={`/exercicios/${exercise.id}`}><ExerciseVisual visual={exercise.visual} label={exercise.name} compact /><span><strong>{exercise.name}</strong><small>{exercise.group} · {exercise.equipment}{exercise.origin === 'custom' ? ' · pessoal' : ''}</small></span></NavLink><button className="icon-button small" aria-label={data.favorites.includes(exercise.id) ? `Desfavoritar ${exercise.name}` : `Favoritar ${exercise.name}`} onClick={() => void toggleFavorite(exercise.id)}><Heart size={19} fill={data.favorites.includes(exercise.id) ? 'currentColor' : 'none'} /></button></div>)}</div>
+      </> : <div className="template-library"><p className="library-note">Modelos apenas preparam o treino. Você pode trocar ou remover qualquer exercício.</p>{allTemplates.map((template) => <article className="template-row" key={template.id}><span className="template-thread" /><div><p>{template.origin === 'custom' ? 'modelo pessoal' : 'modelo do app'}</p><h2>{template.name}</h2><small>{template.note}</small><div className="template-exercises">{template.exerciseIds.slice(0, 4).map((id) => <span key={id}>{allExercises.find((exercise) => exercise.id === id)?.name ?? 'Exercício removido'}</span>)}{template.exerciseIds.length > 4 && <span>+{template.exerciseIds.length - 4}</span>}</div></div></article>)}</div>}
       {creating && <CustomExerciseSheet onClose={() => setCreating(false)} onSaved={async () => { await refresh(); setCreating(false); setNotice('Exercício pessoal criado.') }} />}
+      {creatingTemplate && <TemplateSheet exercises={allExercises} onClose={() => setCreatingTemplate(false)} onSaved={async () => { await refresh(); setCreatingTemplate(false); setNotice('Modelo pessoal criado.') }} />}
     </div>
   )
 }
@@ -398,18 +542,33 @@ function ExercisesPage({ data, refresh, setNotice, allExercises }: SharedProps) 
 function CustomExerciseSheet({ onClose, onSaved }: { onClose: () => void; onSaved: () => Promise<void> }) {
   const [name, setName] = useState('')
   const [group, setGroup] = useState('Pernas')
+  const [category, setCategory] = useState<ActivityCategory>('strength')
+  const [metricMode, setMetricMode] = useState<MetricMode>('load-reps')
   const submit = async (event: FormEvent) => {
     event.preventDefault(); if (!name.trim()) return
-    await db.customExercises.put({ id: `custom-${makeId()}`, name: name.trim(), aliases: [], group, equipment: 'Personalizado', instructions: ['Registre aqui as observações que funcionam para você.'], origin: 'custom' }); await onSaved()
+    await db.customExercises.put({ id: `custom-${makeId()}`, name: name.trim(), aliases: [], group, equipment: 'Personalizado', instructions: ['Registre aqui as observações que funcionam para você.'], origin: 'custom', category, metricMode, visual: category === 'strength' ? 'flow' : 'walk' }); await onSaved()
   }
-  return <div className="sheet-backdrop"><form className="bottom-sheet" onSubmit={(event) => void submit(event)}><div className="sheet-handle" /><header><h2>novo exercício</h2><button type="button" className="icon-button" aria-label="Fechar" onClick={onClose}><X /></button></header><label className="field"><span>nome</span><input autoFocus value={name} onChange={(event) => setName(event.target.value)} placeholder="ex.: passada no step" /></label><label className="field"><span>grupo principal</span><select value={group} onChange={(event) => setGroup(event.target.value)}>{exerciseGroups.filter((value) => value !== 'Todos').map((value) => <option key={value}>{value}</option>)}</select></label><button className="primary-button wide" disabled={!name.trim()}>criar exercício</button></form></div>
+  return <div className="sheet-backdrop"><form className="bottom-sheet" onSubmit={(event) => void submit(event)}><div className="sheet-handle" /><header><h2>novo exercício</h2><button type="button" className="icon-button" aria-label="Fechar" onClick={onClose}><X /></button></header><label className="field"><span>nome</span><input autoFocus value={name} onChange={(event) => setName(event.target.value)} placeholder="ex.: passada no step" /></label><label className="field"><span>tipo</span><select value={category} onChange={(event) => { const next = event.target.value as ActivityCategory; setCategory(next); setMetricMode(next === 'strength' ? 'load-reps' : 'time-only') }}><option value="strength">Musculação</option><option value="cardio">Cardio</option><option value="other">Outra atividade</option></select></label><label className="field"><span>como registrar</span><select value={metricMode} onChange={(event) => setMetricMode(event.target.value as MetricMode)}>{category === 'strength' ? <><option value="load-reps">Carga e repetições</option><option value="reps-only">Somente repetições</option><option value="time-only">Somente tempo</option></> : <><option value="distance-time">Distância e tempo</option><option value="time-only">Somente tempo</option></>}</select></label><label className="field"><span>grupo principal</span><select value={group} onChange={(event) => setGroup(event.target.value)}>{exerciseGroups.filter((value) => value !== 'Todos').map((value) => <option key={value}>{value}</option>)}</select></label><button className="primary-button wide" disabled={!name.trim()}>criar exercício</button></form></div>
+}
+
+function TemplateSheet({ exercises, onClose, onSaved }: { exercises: Exercise[]; onClose: () => void; onSaved: () => Promise<void> }) {
+  const [name, setName] = useState('')
+  const [selected, setSelected] = useState<string[]>([])
+  const [query, setQuery] = useState('')
+  const available = exercises.filter((exercise) => exercise.name.toLocaleLowerCase().includes(query.toLocaleLowerCase())).slice(0, 30)
+  const toggle = (id: string) => setSelected((current) => current.includes(id) ? current.filter((value) => value !== id) : [...current, id])
+  const submit = async (event: FormEvent) => {
+    event.preventDefault(); if (!name.trim() || selected.length === 0) return
+    await db.customTemplates.put({ id: `template-custom-${makeId()}`, name: name.trim(), note: `${selected.length} ${selected.length === 1 ? 'exercício' : 'exercícios'} · pessoal`, exerciseIds: selected, origin: 'custom' }); await onSaved()
+  }
+  return <div className="sheet-backdrop"><form className="bottom-sheet template-sheet" onSubmit={(event) => void submit(event)}><div className="sheet-handle" /><header><h2>novo modelo</h2><button type="button" className="icon-button" aria-label="Fechar" onClick={onClose}><X /></button></header><label className="field"><span>nome do modelo</span><input autoFocus value={name} onChange={(event) => setName(event.target.value)} placeholder="ex.: pernas de terça" /></label><label className="search-field"><Search size={18} /><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="buscar para adicionar" /></label><p className="selection-count">{selected.length} selecionado{selected.length === 1 ? '' : 's'}</p><div className="template-pick-list">{available.map((exercise) => <label key={exercise.id}><input type="checkbox" checked={selected.includes(exercise.id)} onChange={() => toggle(exercise.id)} /><ExerciseVisual visual={exercise.visual} label={exercise.name} compact /><span>{exercise.name}</span><Check size={17} /></label>)}</div><button className="primary-button wide" disabled={!name.trim() || selected.length === 0}>guardar modelo</button></form></div>
 }
 
 function ExerciseDetail({ allExercises, data, refresh }: { allExercises: Exercise[]; data: AppSnapshot; refresh: () => Promise<void> }) {
   const { id } = useParams(); const navigate = useNavigate(); const exercise = allExercises.find((item) => item.id === id)
   if (!exercise) return <SimpleEmpty icon={<BookOpen />} title="Exercício não encontrado" />
   const favorite = data.favorites.includes(exercise.id)
-  return <div className="page detail-page"><header className="detail-top"><button className="icon-button" aria-label="Voltar" onClick={() => navigate(-1)}><ArrowLeft /></button><button className="icon-button soft" aria-label={favorite ? 'Desfavoritar' : 'Favoritar'} onClick={async () => { if (favorite) await db.favorites.delete(exercise.id); else await db.favorites.put({ exerciseId: exercise.id }); await refresh() }}><Heart fill={favorite ? 'currentColor' : 'none'} /></button></header><p className="eyebrow">{exercise.group} · {exercise.equipment}</p><h1>{exercise.name}</h1><div className="detail-illustration"><span>{exercise.name.slice(0, 1).toLocaleLowerCase()}</span><i /></div><section><p className="eyebrow">um passo de cada vez</p><ol className="instruction-list">{exercise.instructions.map((instruction, index) => <li key={instruction}><span>{index + 1}</span><p>{instruction}</p></li>)}</ol></section><aside className="care-note"><Info size={18} /><p>Use uma carga confortável e interrompa se sentir dor. Estas dicas não substituem orientação profissional.</p></aside></div>
+  return <div className="page detail-page"><header className="detail-top"><button className="icon-button" aria-label="Voltar" onClick={() => navigate(-1)}><ArrowLeft /></button><button className="icon-button soft" aria-label={favorite ? 'Desfavoritar' : 'Favoritar'} onClick={async () => { if (favorite) await db.favorites.delete(exercise.id); else await db.favorites.put({ exerciseId: exercise.id }); await refresh() }}><Heart fill={favorite ? 'currentColor' : 'none'} /></button></header><p className="eyebrow">{exercise.group} · {exercise.equipment}</p><h1>{exercise.name}</h1><div className="detail-illustration"><ExerciseVisual visual={exercise.visual} label={exercise.name} /><small>movimento resumido</small></div><section><p className="eyebrow">um passo de cada vez</p><ol className="instruction-list">{exercise.instructions.map((instruction, index) => <li key={instruction}><span>{index + 1}</span><p>{instruction}</p></li>)}</ol></section><aside className="care-note"><Info size={18} /><p>A ilustração ajuda a reconhecer o movimento, mas não demonstra todos os ajustes. Estas dicas não substituem orientação profissional.</p></aside></div>
 }
 
 function EvolutionPage({ data, allExercises }: { data: AppSnapshot; allExercises: Exercise[] }) {
@@ -419,15 +578,17 @@ function EvolutionPage({ data, allExercises }: { data: AppSnapshot; allExercises
   const points = exerciseProgress(data.workouts, selected)
   const maxValue = Math.max(...points.map((point) => point.value), 1)
   const selectedName = allExercises.find((exercise) => exercise.id === selected)?.name
-  return <div className="page evolution-page"><PageHeader eyebrow="sem pressa" title="evolução" /><section className="month-summary"><p>neste mês</p><strong>{thisMonthCount(data.workouts)}</strong><span>treinos que você guardou</span><i /></section><div className="stat-strip"><div><strong>{completed.length}</strong><span>treinos no total</span></div><div><strong>{totalCompletedSets(data.workouts)}</strong><span>séries concluídas</span></div></div><section className="progress-section"><div className="section-heading"><div><p className="eyebrow">carga por sessão</p><h2>um exercício</h2></div></div>{usedExercises.length === 0 ? <div className="empty-gentle"><BarChart3 size={22} /><p>Registre alguns treinos para enxergar mudanças por aqui.</p></div> : <><label className="field compact"><span>exercício</span><select value={selected} onChange={(event) => setSelected(event.target.value)}>{usedExercises.map((id) => <option key={id} value={id}>{allExercises.find((exercise) => exercise.id === id)?.name ?? id}</option>)}</select></label>{points.length === 0 ? <p className="chart-summary">Ainda não há cargas concluídas para este exercício.</p> : <><div className="mini-chart" role="img" aria-label={`Evolução da carga em ${selectedName}: ${points.map((point) => `${point.value} ${data.profile.loadUnit} em ${formatDay(point.date)}`).join(', ')}`}><span className="chart-max">{maxValue} {data.profile.loadUnit}</span><div className="chart-bars">{points.slice(-8).map((point) => <div key={point.date} style={{ height: `${Math.max(12, point.value / maxValue * 100)}%` }}><span>{point.value}</span></div>)}</div></div><p className="chart-summary">Maior carga registrada em {selectedName}: <strong>{maxValue} {data.profile.loadUnit}</strong>.</p></>}</>}</section><p className="little-note"><span>✦</span> evolução também é voltar, ajustar e continuar</p></div>
+  return <div className="page evolution-page"><PageHeader eyebrow="sem pressa" title="evolução" /><section className="month-summary"><p>neste mês</p><strong>{thisMonthCount(data.workouts)}</strong><span>treinos que você guardou</span><i /></section><div className="stat-strip"><div><strong>{completed.length}</strong><span>treinos no total</span></div><div><strong>{totalCompletedSets(data.workouts)}</strong><span>registros concluídos</span></div></div><section className="progress-section"><div className="section-heading"><div><p className="eyebrow">carga por sessão</p><h2>um exercício</h2></div></div>{usedExercises.length === 0 ? <div className="empty-gentle"><BarChart3 size={22} /><p>Registre alguns treinos para enxergar mudanças por aqui.</p></div> : <><label className="field compact"><span>exercício</span><select value={selected} onChange={(event) => setSelected(event.target.value)}>{usedExercises.map((id) => <option key={id} value={id}>{allExercises.find((exercise) => exercise.id === id)?.name ?? id}</option>)}</select></label>{points.length === 0 ? <p className="chart-summary">Ainda não há cargas concluídas para este exercício.</p> : <><div className="mini-chart" role="img" aria-label={`Evolução da carga em ${selectedName}: ${points.map((point) => `${point.value} ${data.profile.loadUnit} em ${formatDay(point.date)}`).join(', ')}`}><span className="chart-max">{maxValue} {data.profile.loadUnit}</span><div className="chart-bars">{points.slice(-8).map((point) => <div key={point.date} style={{ height: `${Math.max(12, point.value / maxValue * 100)}%` }}><span>{point.value}</span></div>)}</div></div><p className="chart-summary">Maior carga registrada em {selectedName}: <strong>{maxValue} {data.profile.loadUnit}</strong>.</p></>}</>}</section><p className="little-note"><span>✦</span> evolução também é voltar, ajustar e continuar</p></div>
 }
 
 function ProfilePage({ data, refresh, setNotice }: SharedProps) {
   const [profile, setLocalProfile] = useState(data.profile)
   const fileRef = useRef<HTMLInputElement>(null)
   const persistProfile = async (next: Profile) => { setLocalProfile(next); await saveProfile(next); await refresh() }
+  const displayWeight = profile.bodyWeightKg === undefined ? undefined : profile.loadUnit === 'kg' ? profile.bodyWeightKg : kgToLb(profile.bodyWeightKg)
+  const bmi = calculateBmi(profile.bodyWeightKg, profile.heightCm)
   const exportData = async () => {
-    const backup = { app: 'treino-de-garota', schemaVersion: 1, exportedAt: new Date().toISOString(), data }
+    const backup = { app: 'treino-de-garota', schemaVersion: 2, exportedAt: new Date().toISOString(), data }
     const url = URL.createObjectURL(new Blob([JSON.stringify(backup, null, 2)], { type: 'application/json' }))
     const anchor = document.createElement('a'); anchor.href = url; anchor.download = `treino-de-garota-${new Date().toISOString().slice(0, 10)}.json`; anchor.click(); URL.revokeObjectURL(url); setNotice('Backup baixado.')
   }
@@ -435,11 +596,13 @@ function ProfilePage({ data, refresh, setNotice }: SharedProps) {
     const file = event.target.files?.[0]; if (!file) return
     try {
       const backup = JSON.parse(await file.text()) as { app?: string; schemaVersion?: number; data?: AppSnapshot }
-      if (backup.app !== 'treino-de-garota' || backup.schemaVersion !== 1 || !backup.data) throw new Error('invalid')
+      if (backup.app !== 'treino-de-garota' || ![1, 2].includes(backup.schemaVersion ?? 0) || !backup.data) throw new Error('invalid')
       if (!window.confirm('Substituir os dados deste aparelho pelos dados do backup?')) return
+      const importedWorkouts = backup.data.workouts.map(normalizeWorkout)
+      const importedExercises = backup.data.customExercises.map(normalizeCustomExercise)
       await clearAllData()
-      await db.transaction('rw', [db.workouts, db.timeline, db.favorites, db.customExercises, db.profiles], async () => {
-        await db.workouts.bulkPut(backup.data!.workouts); await db.timeline.bulkPut(backup.data!.timeline); await db.favorites.bulkPut(backup.data!.favorites.map((exerciseId) => ({ exerciseId }))); await db.customExercises.bulkPut(backup.data!.customExercises); await db.profiles.put(backup.data!.profile)
+      await db.transaction('rw', [db.workouts, db.timeline, db.favorites, db.customExercises, db.customTemplates, db.profiles], async () => {
+        await db.workouts.bulkPut(importedWorkouts); await db.timeline.bulkPut(backup.data!.timeline); await db.favorites.bulkPut(backup.data!.favorites.map((exerciseId) => ({ exerciseId }))); await db.customExercises.bulkPut(importedExercises); await db.customTemplates.bulkPut(backup.data!.customTemplates ?? []); await db.profiles.put({ ...defaultProfile, ...backup.data!.profile })
       })
       await refresh(); setNotice('Backup restaurado.')
     } catch { setNotice('Este arquivo não é um backup válido.') } finally { event.target.value = '' }
@@ -448,21 +611,25 @@ function ProfilePage({ data, refresh, setNotice }: SharedProps) {
     if (!window.confirm('Apagar todos os treinos, fotos, notas e preferências deste aparelho? Esta ação não pode ser desfeita.')) return
     await clearAllData(); await saveProfile({ ...defaultProfile, onboarded: true }); await refresh(); setNotice('Dados apagados deste aparelho.')
   }
-  return <div className="page profile-page"><PageHeader eyebrow="seu espaço" title="eu" /><section className="profile-intro"><div className="avatar-soft"><UserRound /></div><label><span>como quer ser chamada?</span><input value={profile.nickname} placeholder="seu apelido" onBlur={() => void persistProfile(profile)} onChange={(event) => setLocalProfile({ ...profile, nickname: event.target.value })} /></label></section><section className="settings-section"><h2>preferências</h2><div className="setting-row"><span><strong>unidade de carga</strong><small>usada nos próximos registros</small></span><div className="segmented small"><button className={profile.loadUnit === 'kg' ? 'selected' : ''} onClick={() => void persistProfile({ ...profile, loadUnit: 'kg' })}>kg</button><button className={profile.loadUnit === 'lb' ? 'selected' : ''} onClick={() => void persistProfile({ ...profile, loadUnit: 'lb' })}>lb</button></div></div><div className="setting-row"><span><strong>peso corporal</strong><small>fica oculto enquanto desligado</small></span><button className={profile.bodyWeightEnabled ? 'switch on' : 'switch'} role="switch" aria-checked={profile.bodyWeightEnabled} onClick={() => void persistProfile({ ...profile, bodyWeightEnabled: !profile.bodyWeightEnabled })}><i /></button></div></section><section className="data-section"><p className="eyebrow">seus dados</p><h2>ficam neste aparelho</h2><p>Faça um backup para levar sua história com você ou recuperar depois.</p><button className="data-action" onClick={() => void exportData()}><Download /><span><strong>baixar backup</strong><small>treinos, notas, fotos e preferências</small></span><ChevronRight /></button><button className="data-action" onClick={() => fileRef.current?.click()}><Upload /><span><strong>restaurar backup</strong><small>substitui os dados deste aparelho</small></span><ChevronRight /></button><input ref={fileRef} hidden type="file" accept="application/json" onChange={(event) => void importData(event)} /><button className="danger-action" onClick={() => void erase()}><Trash2 size={18} /> apagar todos os dados</button></section><footer className="app-footer"><span className="brand-mark small">tg</span><p>treino de garota · primeiro diário</p></footer></div>
+  return <div className="page profile-page"><PageHeader eyebrow="seu espaço" title="eu" /><section className="profile-intro"><div className="avatar-soft"><UserRound /></div><label><span>como quer ser chamada?</span><input value={profile.nickname} placeholder="seu apelido" onBlur={() => void persistProfile(profile)} onChange={(event) => setLocalProfile({ ...profile, nickname: event.target.value })} /></label></section><section className="settings-section"><h2>preferências</h2><div className="setting-row"><span><strong>unidade de carga</strong><small>usada nos próximos registros</small></span><div className="segmented small"><button className={profile.loadUnit === 'kg' ? 'selected' : ''} onClick={() => void persistProfile({ ...profile, loadUnit: 'kg' })}>kg</button><button className={profile.loadUnit === 'lb' ? 'selected' : ''} onClick={() => void persistProfile({ ...profile, loadUnit: 'lb' })}>lb</button></div></div><div className="setting-row"><span><strong>peso na linha</strong><small>permite registros de peso corporal</small></span><button className={profile.bodyWeightEnabled ? 'switch on' : 'switch'} role="switch" aria-label="Permitir peso corporal na linha" aria-checked={profile.bodyWeightEnabled} onClick={() => void persistProfile({ ...profile, bodyWeightEnabled: !profile.bodyWeightEnabled })}><i /></button></div></section><details className="health-details"><summary><span><strong>corpo e contexto de saúde</strong><small>tudo opcional</small></span><ChevronRight size={19} /></summary><div className="health-fields"><p className="sensitive-note"><Info size={16} /> Estes dados ficam no aparelho e ainda não mudam sugestões do app.</p><div className="profile-number-grid"><label><span>peso ({profile.loadUnit})</span><LocalizedNumberInput value={displayWeight} label={`Peso corporal em ${profile.loadUnit}`} onCommit={(value) => void persistProfile({ ...profile, bodyWeightKg: value === undefined ? undefined : profile.loadUnit === 'kg' ? value : lbToKg(value) })} /></label><label><span>altura (cm)</span><LocalizedNumberInput value={profile.heightCm} label="Altura em centímetros" onCommit={(value) => void persistProfile({ ...profile, heightCm: value })} /></label></div><div className="setting-row"><span><strong>mostrar IMC</strong><small>calculado só com peso e altura</small></span><button className={profile.showBmi ? 'switch on' : 'switch'} role="switch" aria-label="Mostrar IMC" aria-checked={Boolean(profile.showBmi)} onClick={() => void persistProfile({ ...profile, showBmi: !profile.showBmi })}><i /></button></div>{profile.showBmi && <div className="bmi-line"><span>IMC</span><strong>{bmi === undefined ? 'preencha peso e altura' : formatLocalizedNumber(bmi)}</strong><small>Informativo, sem classificação ou diagnóstico.</small></div>}<label className="profile-number-field"><span>duração média do ciclo (dias)</span><LocalizedNumberInput value={profile.menstrualCycleDays} label="Duração média do ciclo menstrual em dias" onCommit={(value) => void persistProfile({ ...profile, menstrualCycleDays: value })} /></label><label className="field"><span>gravidez</span><select value={profile.pregnancyStatus ?? ''} onChange={(event) => void persistProfile({ ...profile, pregnancyStatus: event.target.value ? event.target.value as Profile['pregnancyStatus'] : undefined })}><option value="">Prefiro não informar</option><option value="pregnant">Estou grávida</option><option value="not-pregnant">Não estou grávida</option></select></label></div></details><section className="data-section"><p className="eyebrow">seus dados</p><h2>ficam neste aparelho</h2><p>Faça um backup para levar sua história com você ou recuperar depois.</p><button className="data-action" onClick={() => void exportData()}><Download /><span><strong>baixar backup</strong><small>treinos, notas, fotos, modelos e preferências</small></span><ChevronRight /></button><button className="data-action" onClick={() => fileRef.current?.click()}><Upload /><span><strong>restaurar backup</strong><small>substitui os dados deste aparelho</small></span><ChevronRight /></button><input ref={fileRef} hidden type="file" accept="application/json" onChange={(event) => void importData(event)} /><button className="danger-action" onClick={() => void erase()}><Trash2 size={18} /> apagar todos os dados</button></section><footer className="app-footer"><span className="brand-mark small">tg</span><p>treino de garota · primeiro diário</p></footer></div>
 }
 
 function WorkoutDetail({ data }: { data: AppSnapshot }) {
   const { id } = useParams(); const navigate = useNavigate(); const workout = data.workouts.find((item) => item.id === id)
   if (!workout) return <SimpleEmpty icon={<Dumbbell />} title="Treino não encontrado" />
-  return <div className="page detail-page"><header className="detail-top"><button className="icon-button" aria-label="Voltar" onClick={() => navigate(-1)}><ArrowLeft /></button></header><p className="eyebrow">{formatLongDate(workout.endedAt ?? workout.startedAt)}</p><h1>{workout.title}</h1><p className="lead compact">{workoutDurationMinutes(workout)} min · {workout.items.length} exercícios{workout.feeling ? ` · ${workout.feeling}` : ''}</p><div className="workout-detail-list">{workout.items.map((item) => <section key={item.id}><h2>{item.exerciseName}</h2><p>{item.sets.filter((set) => set.completed).map((set) => `${set.load ?? '—'} ${data.profile.loadUnit} × ${set.reps ?? '—'}`).join('  ·  ') || 'Sem séries concluídas'}</p>{item.note && <small>{item.note}</small>}</section>)}</div></div>
+  return <div className="page detail-page"><header className="detail-top"><button className="icon-button" aria-label="Voltar" onClick={() => navigate(-1)}><ArrowLeft /></button></header><p className="eyebrow">{formatLongDate(workout.endedAt ?? workout.startedAt)}</p><h1>{workout.title}</h1><p className="lead compact">{workoutDurationMinutes(workout)} min · {workout.items.length} atividades{workout.feeling ? ` · ${workout.feeling}` : ''}</p><div className="workout-detail-list">{workout.items.map((item) => <section key={item.id}><h2>{item.exerciseName}</h2><p>{item.sets.filter((set) => set.completed).map((set) => formatSetSummary(set, item.metricMode, data.profile.loadUnit)).join('  ·  ') || 'Sem registros concluídos'}</p>{item.note && <small>{item.note}</small>}</section>)}</div></div>
 }
 
 function BottomNav() {
   const items = [
-    { to: '/', label: 'Hoje', icon: Home }, { to: '/linha', label: 'Linha', icon: NotebookPen },
-    { to: '/exercicios', label: 'Exercícios', icon: BookOpen }, { to: '/evolucao', label: 'Evolução', icon: BarChart3 }, { to: '/eu', label: 'Eu', icon: UserRound },
+    { to: '/', label: 'Hoje', icon: Home }, { to: '/linha', label: 'Linha', icon: TimelinePathIcon },
+    { to: '/exercicios', label: 'Biblioteca', icon: BookOpen }, { to: '/evolucao', label: 'Evolução', icon: BarChart3 }, { to: '/eu', label: 'Eu', icon: UserRound },
   ]
   return <nav className="bottom-nav" aria-label="Navegação principal">{items.map(({ to, label, icon: Icon }) => <NavLink key={to} to={to} end={to === '/'}><Icon size={21} /><span>{label}</span></NavLink>)}</nav>
+}
+
+function TimelinePathIcon({ size = 21 }: { size?: number }) {
+  return <svg width={size} height={size} viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M4.5 4.5h10a4 4 0 0 1 0 8h-5a3.5 3.5 0 0 0 0 7h10" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" /><circle cx="4.5" cy="4.5" r="2.1" fill="currentColor" /><circle cx="10" cy="4.5" r="1.8" fill="var(--white)" stroke="currentColor" strokeWidth="1.5" /><circle cx="14.5" cy="12.5" r="1.8" fill="var(--white)" stroke="currentColor" strokeWidth="1.5" /><circle cx="9.5" cy="19.5" r="1.8" fill="var(--white)" stroke="currentColor" strokeWidth="1.5" /><circle cx="19.5" cy="19.5" r="2.1" fill="currentColor" /></svg>
 }
 
 function SimpleEmpty({ icon, title, text, action }: { icon: ReactNode; title: string; text?: string; action?: ReactNode }) {
@@ -470,11 +637,63 @@ function SimpleEmpty({ icon, title, text, action }: { icon: ReactNode; title: st
 }
 
 async function compressImage(file: File): Promise<string> {
-  const source = await new Promise<string>((resolve, reject) => { const reader = new FileReader(); reader.onload = () => resolve(String(reader.result)); reader.onerror = reject; reader.readAsDataURL(file) })
-  const image = await new Promise<HTMLImageElement>((resolve, reject) => { const img = new Image(); img.onload = () => resolve(img); img.onerror = reject; img.src = source })
-  const max = 1400; const scale = Math.min(1, max / Math.max(image.width, image.height)); const canvas = document.createElement('canvas'); canvas.width = Math.round(image.width * scale); canvas.height = Math.round(image.height * scale)
-  canvas.getContext('2d')!.drawImage(image, 0, 0, canvas.width, canvas.height)
-  return canvas.toDataURL('image/jpeg', 0.78)
+  const source = await readFileAsDataUrl(file)
+  try {
+    const image = await createImageBitmap(file, { imageOrientation: 'from-image' })
+    const result = drawCompressedImage(image, image.width, image.height)
+    image.close()
+    return result
+  } catch {
+    try {
+      const image = await new Promise<HTMLImageElement>((resolve, reject) => { const img = new Image(); img.onload = () => resolve(img); img.onerror = reject; img.src = source })
+      return drawCompressedImage(image, image.naturalWidth, image.naturalHeight)
+    } catch {
+      if (file.size <= 3_000_000) return source
+      throw new Error('unsupported-image')
+    }
+  }
+}
+
+function drawCompressedImage(image: CanvasImageSource, width: number, height: number) {
+  const max = 1400
+  const scale = Math.min(1, max / Math.max(width, height))
+  const canvas = document.createElement('canvas')
+  canvas.width = Math.max(1, Math.round(width * scale))
+  canvas.height = Math.max(1, Math.round(height * scale))
+  const context = canvas.getContext('2d')
+  if (!context) throw new Error('canvas-unavailable')
+  context.fillStyle = '#fffdf8'
+  context.fillRect(0, 0, canvas.width, canvas.height)
+  context.drawImage(image, 0, 0, canvas.width, canvas.height)
+  const result = canvas.toDataURL('image/jpeg', .8)
+  if (result === 'data:,') throw new Error('empty-image')
+  return result
+}
+
+function readFileAsDataUrl(file: File) {
+  return new Promise<string>((resolve, reject) => { const reader = new FileReader(); reader.onload = () => resolve(String(reader.result)); reader.onerror = reject; reader.readAsDataURL(file) })
+}
+
+function formatSetSummary(set: WorkoutSet, mode: MetricMode, unit: Profile['loadUnit']) {
+  if (mode === 'load-reps') return `${formatLocalizedNumber(set.load)} ${unit} × ${formatLocalizedNumber(set.reps)}`
+  if (mode === 'reps-only') return `${formatLocalizedNumber(set.reps)} repetições`
+  if (mode === 'distance-time') return `${formatLocalizedNumber(set.distanceKm)} km · ${formatLocalizedNumber(set.durationMinutes)} min`
+  return `${formatLocalizedNumber(set.durationMinutes)} min`
+}
+
+function normalizeWorkout(workout: Workout): Workout {
+  return {
+    ...workout,
+    restSeconds: workout.restSeconds ?? 90,
+    items: workout.items.map((item) => {
+      const known = systemExercises.find((exercise) => exercise.id === item.exerciseId)
+      return { ...item, category: item.category ?? known?.category ?? 'strength', metricMode: item.metricMode ?? known?.metricMode ?? 'load-reps' }
+    }),
+  }
+}
+
+function normalizeCustomExercise(exercise: Exercise): Exercise {
+  return { ...exercise, category: exercise.category ?? 'strength', metricMode: exercise.metricMode ?? 'load-reps', visual: exercise.visual ?? 'flow' }
 }
 
 export default App

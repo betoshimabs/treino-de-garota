@@ -7,7 +7,32 @@ const makeExercise = (
   group: string,
   equipment: string,
   instructions: string[],
-): Exercise => ({ id, name, aliases, group, equipment, instructions, origin: 'system' })
+  options: Partial<Pick<Exercise, 'category' | 'metricMode' | 'visual'>> = {},
+): Exercise => ({
+  id,
+  name,
+  aliases,
+  group,
+  equipment,
+  instructions,
+  origin: 'system',
+  category: options.category ?? 'strength',
+  metricMode: options.metricMode ?? 'load-reps',
+  visual: options.visual ?? visualFor(id),
+})
+
+function visualFor(id: string): Exercise['visual'] {
+  if (/agachamento|leg-press|extensora|flexora|abdutora|panturrilha/.test(id)) return 'squat'
+  if (/stiff/.test(id)) return 'hinge'
+  if (/pelvica|gluteo/.test(id)) return 'bridge'
+  if (/afundo/.test(id)) return 'lunge'
+  if (/supino|crucifixo|desenvolvimento|triceps/.test(id)) return 'press'
+  if (/puxada|remada/.test(id)) return 'pull'
+  if (/elevacao-lateral/.test(id)) return 'raise'
+  if (/rosca/.test(id)) return 'curl'
+  if (/prancha|crunch/.test(id)) return 'plank'
+  return 'flow'
+}
 
 export const exercises: Exercise[] = [
   makeExercise('agachamento-livre', 'Agachamento livre', ['agachamento', 'squat'], 'Pernas', 'Barra', ['Apoie a barra com conforto.', 'Desça mantendo os pés firmes.', 'Suba sem perder o alinhamento dos joelhos.']),
@@ -33,10 +58,20 @@ export const exercises: Exercise[] = [
   makeExercise('rosca-martelo', 'Rosca martelo', ['martelo'], 'Braços', 'Halteres', ['Segure com as palmas voltadas entre si.', 'Mantenha os cotovelos estáveis.', 'Controle a volta.']),
   makeExercise('triceps-corda', 'Tríceps na corda', ['tríceps pulley'], 'Braços', 'Cabo', ['Fixe os cotovelos ao lado do corpo.', 'Estenda os braços sem mover os ombros.', 'Retorne com controle.']),
   makeExercise('triceps-frances', 'Tríceps francês', ['tríceps acima da cabeça'], 'Braços', 'Halter', ['Mantenha o abdômen firme.', 'Dobre os cotovelos atrás da cabeça.', 'Estenda sem abrir demais os braços.']),
-  makeExercise('abdominal-prancha', 'Prancha', ['prancha abdominal'], 'Core', 'Peso corporal', ['Apoie antebraços e pés.', 'Mantenha quadril e ombros alinhados.', 'Respire sem perder a posição.']),
-  makeExercise('abdominal-crunch', 'Abdominal curto', ['crunch'], 'Core', 'Peso corporal', ['Mantenha a lombar confortável.', 'Eleve as escápulas sem puxar o pescoço.', 'Desça devagar.']),
-  makeExercise('esteira', 'Caminhada na esteira', ['esteira', 'caminhada'], 'Cardio', 'Máquina', ['Escolha uma velocidade confortável.', 'Mantenha a passada natural.', 'Reduza o ritmo antes de parar.']),
-  makeExercise('bicicleta', 'Bicicleta ergométrica', ['bike', 'bicicleta'], 'Cardio', 'Máquina', ['Ajuste o banco.', 'Pedale sem travar os joelhos.', 'Mantenha um ritmo confortável.']),
+  makeExercise('abdominal-prancha', 'Prancha', ['prancha abdominal'], 'Core', 'Peso corporal', ['Apoie antebraços e pés.', 'Mantenha quadril e ombros alinhados.', 'Respire sem perder a posição.'], { metricMode: 'time-only', visual: 'plank' }),
+  makeExercise('abdominal-crunch', 'Abdominal curto', ['crunch'], 'Core', 'Peso corporal', ['Mantenha a lombar confortável.', 'Eleve as escápulas sem puxar o pescoço.', 'Desça devagar.'], { metricMode: 'reps-only', visual: 'plank' }),
+  makeExercise('esteira', 'Caminhada na esteira', ['esteira', 'caminhada'], 'Cardio', 'Esteira', ['Escolha uma velocidade confortável.', 'Mantenha a passada natural.', 'Reduza o ritmo antes de parar.'], { category: 'cardio', metricMode: 'distance-time', visual: 'walk' }),
+  makeExercise('corrida-esteira', 'Corrida na esteira', ['corrida', 'esteira corrida'], 'Cardio', 'Esteira', ['Aqueça antes de acelerar.', 'Mantenha uma passada confortável.', 'Reduza o ritmo de forma gradual.'], { category: 'cardio', metricMode: 'distance-time', visual: 'walk' }),
+  makeExercise('caminhada-rua', 'Caminhada ao ar livre', ['caminhada rua'], 'Cardio', 'Sem equipamento', ['Escolha um percurso seguro.', 'Mantenha um ritmo confortável.', 'Registre distância e tempo ao terminar.'], { category: 'cardio', metricMode: 'distance-time', visual: 'walk' }),
+  makeExercise('corrida-rua', 'Corrida ao ar livre', ['corrida rua'], 'Cardio', 'Sem equipamento', ['Escolha um percurso seguro.', 'Ajuste o ritmo às condições do dia.', 'Registre distância e tempo ao terminar.'], { category: 'cardio', metricMode: 'distance-time', visual: 'walk' }),
+  makeExercise('bicicleta', 'Bicicleta ergométrica', ['bike', 'bicicleta'], 'Cardio', 'Máquina', ['Ajuste o banco.', 'Pedale sem travar os joelhos.', 'Mantenha um ritmo confortável.'], { category: 'cardio', metricMode: 'distance-time', visual: 'cycle' }),
+  makeExercise('eliptico', 'Elíptico', ['transport', 'cross trainer'], 'Cardio', 'Máquina', ['Ajuste a resistência.', 'Mantenha os pés apoiados.', 'Registre o tempo ao terminar.'], { category: 'cardio', metricMode: 'time-only', visual: 'walk' }),
+  makeExercise('escada', 'Simulador de escada', ['escada', 'stair'], 'Cardio', 'Máquina', ['Comece em ritmo confortável.', 'Apoie as mãos apenas para equilíbrio.', 'Registre o tempo ao terminar.'], { category: 'cardio', metricMode: 'time-only', visual: 'walk' }),
+  makeExercise('natacao', 'Natação', ['nadar', 'piscina'], 'Cardio', 'Piscina', ['Escolha o estilo e ritmo do dia.', 'Conte a distância quando possível.', 'Registre distância e tempo ao terminar.'], { category: 'cardio', metricMode: 'distance-time', visual: 'flow' }),
+  makeExercise('danca', 'Dança', ['aula de dança'], 'Outras', 'Livre', ['Escolha a modalidade.', 'Registre o tempo total da atividade.', 'Use a observação para guardar detalhes.'], { category: 'other', metricMode: 'time-only', visual: 'flow' }),
+  makeExercise('yoga', 'Yoga', ['ioga'], 'Outras', 'Tapete', ['Registre o tempo da prática.', 'Use a observação para anotar a sequência.', 'Respeite sua amplitude confortável.'], { category: 'other', metricMode: 'time-only', visual: 'flow' }),
+  makeExercise('pilates', 'Pilates', [], 'Outras', 'Variado', ['Registre o tempo da sessão.', 'Use a observação para anotar o foco.', 'Siga a orientação da aula ou profissional.'], { category: 'other', metricMode: 'time-only', visual: 'flow' }),
+  makeExercise('mobilidade', 'Mobilidade', ['alongamento', 'mobilidade articular'], 'Outras', 'Livre', ['Escolha as regiões trabalhadas.', 'Registre o tempo total.', 'Anote movimentos importantes se quiser.'], { category: 'other', metricMode: 'time-only', visual: 'flow' }),
 ]
 
 export const exerciseGroups = ['Todos', ...Array.from(new Set(exercises.map((item) => item.group)))]

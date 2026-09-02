@@ -12,6 +12,8 @@ const workout: Workout = {
     id: 'i1',
     exerciseId: 'agachamento-livre',
     exerciseName: 'Agachamento livre',
+    category: 'strength',
+    metricMode: 'load-reps',
     sets: [
       { id: 's1', load: 20, reps: 10, completed: true },
       { id: 's2', load: 25, reps: 8, completed: true },
