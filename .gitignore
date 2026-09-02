@@ -5,3 +5,13 @@
 
 # Optional local strategy workspace
 /.product-private/
+
+# Local build and tooling
+/node_modules/
+/dist/
+/coverage/
+/playwright-report/
+/test-results/
+*.local
+.env*
+!.env.example
