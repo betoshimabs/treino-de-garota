@@ -1,11 +1,10 @@
-import { useEffect, useMemo, useRef, useState, type ChangeEvent, type FormEvent, type ReactNode } from 'react'
+import { useEffect, useId, useMemo, useRef, useState, type ChangeEvent, type FormEvent, type ReactNode } from 'react'
 import {
   ArrowLeft,
   BarChart3,
   BookOpen,
   Check,
   ChevronRight,
-  CirclePlus,
   Clock3,
   Download,
   Dumbbell,
@@ -279,21 +278,33 @@ function TodayPage({ data, refresh, allExercises, allTemplates }: SharedProps) {
   )
 }
 
-function WorkoutPage({ data, refresh, setNotice, allExercises }: SharedProps) {
+function WorkoutPage({ data, refresh, setNotice, allExercises, allTemplates }: SharedProps) {
   const navigate = useNavigate()
   const active = data.workouts.find((workout) => workout.status === 'active')
   const [pickerOpen, setPickerOpen] = useState(false)
+  const [pickerMode, setPickerMode] = useState<'exercise' | 'template'>('exercise')
   const [query, setQuery] = useState('')
   const [seconds, setSeconds] = useState(0)
   const [feeling, setFeeling] = useState<Feeling | undefined>()
   const [section, setSection] = useState<'strength' | 'activities'>('strength')
   const [restOpen, setRestOpen] = useState(false)
+  const [finishConfirm, setFinishConfirm] = useState(false)
+  const [abandonConfirm, setAbandonConfirm] = useState(false)
+  const [actionBusy, setActionBusy] = useState(false)
 
   useEffect(() => {
     if (seconds <= 0) return
     const timer = window.setInterval(() => setSeconds((value) => Math.max(0, value - 1)), 1000)
     return () => window.clearInterval(timer)
   }, [seconds])
+
+  useEffect(() => {
+    if (!pickerOpen) return
+    const previous = document.body.style.overflow
+    document.body.style.overflow = 'hidden'
+    const focusFrame = window.requestAnimationFrame(() => document.querySelector<HTMLButtonElement>('.exercise-picker-sheet .icon-button')?.focus())
+    return () => { window.cancelAnimationFrame(focusFrame); document.body.style.overflow = previous }
+  }, [pickerOpen])
 
   if (!active) return <SimpleEmpty icon={<Dumbbell />} title="Nenhum treino em andamento" action={<button className="primary-button" onClick={() => navigate('/')}>voltar para hoje</button>} />
 
@@ -303,11 +314,32 @@ function WorkoutPage({ data, refresh, setNotice, allExercises }: SharedProps) {
     await db.workouts.put({ ...latest, items: latest.items.map((item) => item.id === itemId ? fn(item) : item) })
     await refresh()
   }
+  const openPicker = () => { setPickerMode('exercise'); setQuery(''); setPickerOpen(true) }
+  const closePicker = () => { setPickerOpen(false); setQuery('') }
+  const toWorkoutItem = (exercise: Exercise): WorkoutItem => ({
+    id: makeId(), exerciseId: exercise.id, exerciseName: exercise.name, category: exercise.category, metricMode: exercise.metricMode,
+    sets: [{ id: makeId(), completed: false }],
+  })
   const addExercise = async (exercise: Exercise) => {
-    const item: WorkoutItem = { id: makeId(), exerciseId: exercise.id, exerciseName: exercise.name, category: exercise.category, metricMode: exercise.metricMode, sets: [{ id: makeId(), completed: false }] }
     const latest = await db.workouts.get(active.id) ?? active
-    await persist({ ...latest, items: [...latest.items, item] })
-    setPickerOpen(false); setQuery('')
+    await persist({ ...latest, items: [...latest.items, toWorkoutItem(exercise)] })
+    closePicker()
+  }
+  const addTemplate = async (template: WorkoutTemplate) => {
+    const latest = await db.workouts.get(active.id) ?? active
+    const existing = new Set(latest.items.map((item) => item.exerciseId))
+    const additions = template.exerciseIds
+      .map((id) => allExercises.find((exercise) => exercise.id === id))
+      .filter((exercise): exercise is Exercise => Boolean(exercise))
+      .filter((exercise) => !existing.has(exercise.id))
+      .map(toWorkoutItem)
+    if (additions.length === 0) { setNotice('Os exercícios deste modelo já estão no treino.'); return }
+    await persist({ ...latest, items: [...latest.items, ...additions] })
+    const currentCategory = section === 'strength' ? 'strength' : 'activities'
+    const hasCurrentCategory = additions.some((item) => currentCategory === 'strength' ? item.category === 'strength' : item.category !== 'strength')
+    if (!hasCurrentCategory) setSection(additions[0].category === 'strength' ? 'strength' : 'activities')
+    closePicker()
+    setNotice(`${template.name} adicionado ao treino.`)
   }
   const updateSet = async (itemId: string, setId: string, patch: Partial<WorkoutSet>) => {
     await updateItem(itemId, (item) => ({ ...item, sets: item.sets.map((set) => set.id === setId ? { ...set, ...patch } : set) }))
@@ -325,41 +357,63 @@ function WorkoutPage({ data, refresh, setNotice, allExercises }: SharedProps) {
     await refresh()
     if (!latestSet.completed && item.category === 'strength') setSeconds(latestWorkout.restSeconds ?? 90)
   }
+  const askToFinish = async () => {
+    const latest = await db.workouts.get(active.id) ?? active
+    if (!latest.items.some((item) => item.sets.some((set) => set.completed))) {
+      setNotice('Conclua ao menos uma série ou registro antes de finalizar.')
+      return
+    }
+    setFinishConfirm(true)
+  }
   const finish = async () => {
-    const hasSet = active.items.some((item) => item.sets.some((set) => set.completed))
-    if (!hasSet) { setNotice('Conclua ao menos uma série ou registro antes de finalizar.'); return }
+    setActionBusy(true)
+    const latest = await db.workouts.get(active.id) ?? active
     const endedAt = new Date().toISOString()
-    const completedWorkout = { ...active, status: 'completed' as const, endedAt, feeling }
-    const exerciseCount = active.items.length
-    const setCount = active.items.reduce((sum, item) => sum + item.sets.filter((set) => set.completed).length, 0)
-    const includesActivities = active.items.some((item) => item.category !== 'strength')
+    const completedWorkout = { ...latest, status: 'completed' as const, endedAt, feeling }
+    const exerciseCount = latest.items.filter((item) => item.sets.some((set) => set.completed)).length
+    const setCount = latest.items.reduce((sum, item) => sum + item.sets.filter((set) => set.completed).length, 0)
+    const includesActivities = latest.items.some((item) => item.category !== 'strength' && item.sets.some((set) => set.completed))
     const entry: TimelineEntry = {
-      id: makeId(), kind: 'workout', occurredAt: endedAt, title: active.title,
+      id: makeId(), kind: 'workout', occurredAt: endedAt, title: latest.title,
       text: `${exerciseCount} ${exerciseCount === 1 ? 'atividade' : 'atividades'} · ${setCount} ${includesActivities ? (setCount === 1 ? 'registro' : 'registros') : (setCount === 1 ? 'série' : 'séries')}`,
-      sourceId: active.id, isMilestone: false,
+      sourceId: latest.id, isMilestone: false,
     }
     await db.transaction('rw', [db.workouts, db.timeline], async () => { await db.workouts.put(completedWorkout); await db.timeline.put(entry) })
-    await refresh(); setNotice('Treino guardado na sua linha.'); navigate('/linha')
+    await refresh()
+    setActionBusy(false)
+    setFinishConfirm(false)
+    setNotice('Treino guardado na sua linha.')
+    navigate('/linha')
   }
   const abandon = async () => {
-    if (!window.confirm('Apagar este treino em andamento? As séries registradas serão removidas.')) return
-    await db.workouts.delete(active.id); await refresh(); navigate('/')
+    setActionBusy(true)
+    await db.workouts.delete(active.id)
+    await refresh()
+    setActionBusy(false)
+    setAbandonConfirm(false)
+    navigate('/')
   }
   const filtered = allExercises.filter((exercise) => {
     const inSection = section === 'strength' ? exercise.category === 'strength' : exercise.category !== 'strength'
     return inSection && `${exercise.name} ${exercise.aliases.join(' ')}`.toLocaleLowerCase().includes(query.toLocaleLowerCase())
-  }).slice(0, 14)
+  }).slice(0, 18)
+  const filteredTemplates = allTemplates.filter((template) => {
+    const exerciseNames = template.exerciseIds.map((id) => allExercises.find((exercise) => exercise.id === id)?.name ?? '').join(' ')
+    return `${template.name} ${template.note} ${exerciseNames}`.toLocaleLowerCase().includes(query.toLocaleLowerCase())
+  })
   const elapsed = Math.max(0, Math.floor((Date.now() - new Date(active.startedAt).getTime()) / 60000))
   const visibleItems = active.items.filter((item) => section === 'strength' ? item.category === 'strength' : item.category !== 'strength')
   const strengthCount = active.items.filter((item) => item.category === 'strength').length
   const activityCount = active.items.length - strengthCount
+  const completedItemCount = active.items.filter((item) => item.sets.some((set) => set.completed)).length
+  const completedSetCount = active.items.reduce((sum, item) => sum + item.sets.filter((set) => set.completed).length, 0)
 
   return (
     <div className="workout-page">
       <header className="workout-topbar">
         <button className="icon-button" aria-label="Voltar" onClick={() => navigate('/')}><ArrowLeft /></button>
         <div><p>treino em andamento</p><strong>{elapsed < 1 ? 'agora' : `${elapsed} min`}</strong></div>
-        <button className="icon-button" aria-label="Opções do treino" onClick={abandon}><MoreHorizontal /></button>
+        <button className="icon-button" aria-label="Opções do treino" onClick={() => setAbandonConfirm(true)}><MoreHorizontal /></button>
       </header>
       <div className="workout-title-wrap">
         <input className="workout-title" aria-label="Nome do treino" value={active.title} onChange={(event) => void persist({ ...active, title: event.target.value })} />
@@ -374,35 +428,49 @@ function WorkoutPage({ data, refresh, setNotice, allExercises }: SharedProps) {
       {section === 'strength' && <div className="rest-preference"><button onClick={() => setRestOpen(!restOpen)} aria-expanded={restOpen}><Clock3 size={16} /> descanso {formatTimer(active.restSeconds ?? 90)} <SlidersHorizontal size={15} /></button>{restOpen && <div className="rest-options" aria-label="Tempo de descanso">{[45, 60, 90, 120, 180].map((value) => <button className={(active.restSeconds ?? 90) === value ? 'selected' : ''} key={value} onClick={() => void persist({ ...active, restSeconds: value })}>{formatTimer(value)}</button>)}</div>}</div>}
 
       {visibleItems.length === 0 ? (
-        <div className="workout-empty"><div className="soft-orbit"><Plus size={28} /></div><h2>{section === 'strength' ? 'Qual foi o primeiro?' : 'Algum cardio ou atividade?'}</h2><p>{section === 'strength' ? 'Adicione um exercício para começar a registrar.' : 'Tempo e distância ficam separados da musculação.'}</p></div>
-      ) : visibleItems.map((item, itemIndex) => (
-        <section className="exercise-block" key={item.id} aria-labelledby={`exercise-${item.id}`}>
-          <div className="exercise-block-title"><span>{String(itemIndex + 1).padStart(2, '0')}</span><h2 id={`exercise-${item.id}`}>{item.exerciseName}</h2><button className="icon-button small" aria-label={`Remover ${item.exerciseName}`} onClick={() => void persist({ ...active, items: active.items.filter((row) => row.id !== item.id) })}><X /></button></div>
-          <div className="set-head"><span>{item.category === 'strength' ? 'série' : 'reg.'}</span><MetricLabels mode={item.metricMode} unit={data.profile.loadUnit} /><span>feito</span><span aria-hidden="true" /></div>
-          {item.sets.map((set, setIndex) => (
-            <div className={set.completed ? 'set-row completed' : 'set-row'} key={set.id}>
-              <span className="set-number">{setIndex + 1}</span>
-              <MetricFields mode={item.metricMode} unit={data.profile.loadUnit} set={set} index={setIndex} onCommit={(patch) => void updateSet(item.id, set.id, patch)} />
-              <button className="set-check" aria-label={set.completed ? `Reabrir ${item.category === 'strength' ? 'série' : 'registro'} ${setIndex + 1}` : `Concluir ${item.category === 'strength' ? 'série' : 'registro'} ${setIndex + 1}`} aria-pressed={set.completed} onClick={() => void completeSet(item.id, set)}>{set.completed && <Check size={19} />}</button>
-              <button className="remove-set" aria-label={`Excluir ${item.category === 'strength' ? 'série' : 'registro'} ${setIndex + 1}`} onClick={() => void updateItem(item.id, (row) => ({ ...row, sets: row.sets.filter((entry) => entry.id !== set.id) }))}><Trash2 size={16} /></button>
-            </div>
-          ))}
-          <button className="add-set" onClick={() => void updateItem(item.id, (row) => ({ ...row, sets: [...row.sets, { ...row.sets.at(-1), id: makeId(), completed: false }] }))}><Plus size={17} /> adicionar {item.category === 'strength' ? 'série' : 'registro'}</button>
-          <input className="note-input" aria-label={`Observação sobre ${item.exerciseName}`} placeholder="uma observação, se quiser…" value={item.note ?? ''} onChange={(event) => void updateItem(item.id, (row) => ({ ...row, note: event.target.value }))} />
-        </section>
-      ))}
+        <div className="workout-empty">
+          <button className="workout-add-plus" aria-label={section === 'strength' ? 'Adicionar exercício' : 'Adicionar cardio ou atividade'} onClick={openPicker}><Plus size={29} /></button>
+          <h2>{section === 'strength' ? 'Qual foi o primeiro?' : 'Algum cardio ou atividade?'}</h2>
+          <p>{section === 'strength' ? 'Toque no + para começar a registrar.' : 'Tempo e distância ficam separados da musculação.'}</p>
+        </div>
+      ) : <>
+        {visibleItems.map((item, itemIndex) => (
+          <section className="exercise-block" key={item.id} aria-labelledby={`exercise-${item.id}`}>
+            <div className="exercise-block-title"><span>{String(itemIndex + 1).padStart(2, '0')}</span><h2 id={`exercise-${item.id}`}>{item.exerciseName}</h2><button className="icon-button small" aria-label={`Remover ${item.exerciseName}`} onClick={() => void persist({ ...active, items: active.items.filter((row) => row.id !== item.id) })}><X /></button></div>
+            <div className="set-head"><span>{item.category === 'strength' ? 'série' : 'reg.'}</span><MetricLabels mode={item.metricMode} unit={data.profile.loadUnit} /><span>feito</span><span aria-hidden="true" /></div>
+            {item.sets.map((set, setIndex) => (
+              <div className={set.completed ? 'set-row completed' : 'set-row'} key={set.id}>
+                <span className="set-number">{setIndex + 1}</span>
+                <MetricFields mode={item.metricMode} unit={data.profile.loadUnit} set={set} index={setIndex} onCommit={(patch) => void updateSet(item.id, set.id, patch)} />
+                <button className="set-check" aria-label={set.completed ? `Reabrir ${item.category === 'strength' ? 'série' : 'registro'} ${setIndex + 1}` : `Concluir ${item.category === 'strength' ? 'série' : 'registro'} ${setIndex + 1}`} aria-pressed={set.completed} onClick={() => void completeSet(item.id, set)}>{set.completed && <Check size={19} />}</button>
+                <button className="remove-set" aria-label={`Excluir ${item.category === 'strength' ? 'série' : 'registro'} ${setIndex + 1}`} onClick={() => void updateItem(item.id, (row) => ({ ...row, sets: row.sets.filter((entry) => entry.id !== set.id) }))}><Trash2 size={16} /></button>
+              </div>
+            ))}
+            <button className="add-set" onClick={() => void updateItem(item.id, (row) => ({ ...row, sets: [...row.sets, { ...row.sets.at(-1), id: makeId(), completed: false }] }))}><Plus size={17} /> adicionar {item.category === 'strength' ? 'série' : 'registro'}</button>
+            <input className="note-input" aria-label={`Observação sobre ${item.exerciseName}`} placeholder="uma observação, se quiser…" value={item.note ?? ''} onChange={(event) => void updateItem(item.id, (row) => ({ ...row, note: event.target.value }))} />
+          </section>
+        ))}
+        <button className="workout-add-plus after-list" aria-label={section === 'strength' ? 'Adicionar outro exercício' : 'Adicionar outra atividade'} onClick={openPicker}><Plus size={26} /></button>
+      </>}
 
-      <button className="add-exercise-button" onClick={() => setPickerOpen(true)}><CirclePlus size={20} /> adicionar {section === 'strength' ? 'exercício' : 'atividade'}</button>
       {seconds > 0 && <div className="rest-timer"><Clock3 size={18} /><span>descanso</span><button aria-label="Diminuir descanso em 15 segundos" onClick={() => setSeconds((value) => Math.max(15, value - 15))}>−15</button><strong>{formatTimer(seconds)}</strong><button aria-label="Aumentar descanso em 15 segundos" onClick={() => setSeconds((value) => value + 15)}>+15</button><button aria-label="Encerrar descanso" onClick={() => setSeconds(0)}><X size={17} /></button></div>}
       <section className="finish-area">
         <p>como foi hoje? <span>opcional</span></p>
         <div className="feeling-row">
           {(['leve', 'normal', 'intenso'] as Feeling[]).map((value) => <button className={feeling === value ? 'selected' : ''} key={value} onClick={() => setFeeling(feeling === value ? undefined : value)}>{value}</button>)}
         </div>
-        <button className="primary-button wide" onClick={() => void finish()}><Check size={19} /> finalizar treino</button>
+        <button className="primary-button wide" onClick={() => void askToFinish()}><Check size={19} /> finalizar treino</button>
       </section>
 
-      {pickerOpen && <div className="sheet-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) setPickerOpen(false) }}><section className="bottom-sheet" role="dialog" aria-modal="true" aria-labelledby="picker-title"><div className="sheet-handle" /><header><h2 id="picker-title">adicionar {section === 'strength' ? 'exercício' : 'atividade'}</h2><button className="icon-button" aria-label="Fechar" onClick={() => setPickerOpen(false)}><X /></button></header><label className="search-field"><Search size={19} /><input autoFocus placeholder={section === 'strength' ? 'buscar exercício' : 'buscar cardio ou atividade'} value={query} onChange={(event) => setQuery(event.target.value)} /></label><div className="picker-list">{filtered.map((exercise) => <button key={exercise.id} onClick={() => void addExercise(exercise)}><ExerciseVisual visual={exercise.visual} label={exercise.name} compact /><span><strong>{exercise.name}</strong><small>{exercise.group} · {exercise.equipment}</small></span><Plus size={19} /></button>)}</div></section></div>}
+      {pickerOpen && <div className="sheet-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) closePicker() }}><section className="bottom-sheet exercise-picker-sheet" role="dialog" aria-modal="true" aria-labelledby="picker-title"><div className="sheet-handle" /><header><h2 id="picker-title">adicionar ao treino</h2><button className="icon-button" aria-label="Fechar" onClick={closePicker}><X /></button></header><div className="picker-tabs" role="tablist" aria-label="O que adicionar"><button role="tab" aria-selected={pickerMode === 'exercise'} className={pickerMode === 'exercise' ? 'selected' : ''} onClick={() => { setPickerMode('exercise'); setQuery('') }}>exercício</button><button role="tab" aria-selected={pickerMode === 'template'} className={pickerMode === 'template' ? 'selected' : ''} onClick={() => { setPickerMode('template'); setQuery('') }}>modelo</button></div><label className="search-field"><Search size={19} /><input placeholder={pickerMode === 'exercise' ? (section === 'strength' ? 'buscar exercício' : 'buscar cardio ou atividade') : 'buscar modelo'} value={query} onChange={(event) => setQuery(event.target.value)} /></label>{pickerMode === 'exercise' ? <div className="picker-list" tabIndex={-1}>{filtered.map((exercise) => <button key={exercise.id} onClick={() => void addExercise(exercise)}><ExerciseVisual visual={exercise.visual} label={exercise.name} compact /><span><strong>{exercise.name}</strong><small>{exercise.group} · {exercise.equipment}</small></span><Plus size={19} /></button>)}</div> : <div className="picker-list picker-template-list" tabIndex={-1}>{filteredTemplates.map((template) => <button key={template.id} onClick={() => void addTemplate(template)}><span className="template-picker-mark" /><span><strong>{template.name}</strong><small>{template.note}</small><em>{template.exerciseIds.slice(0, 3).map((id) => allExercises.find((exercise) => exercise.id === id)?.name).filter(Boolean).join(' · ')}</em></span><Plus size={19} /></button>)}</div>}</section></div>}
+
+      <ConfirmDialog open={finishConfirm} title="guardar este treino?" confirmLabel="guardar treino" onClose={() => setFinishConfirm(false)} onConfirm={() => void finish()} busy={actionBusy}>
+        <p>Confira o que vai entrar na sua linha.</p>
+        <div className="workout-confirm-summary"><strong>{elapsed < 1 ? 'menos de 1 min' : `${elapsed} min`}</strong><span>{completedItemCount} {completedItemCount === 1 ? 'atividade' : 'atividades'}</span><span>{completedSetCount} {completedSetCount === 1 ? 'registro concluído' : 'registros concluídos'}</span>{feeling && <span>sensação: {feeling}</span>}</div>
+      </ConfirmDialog>
+      <ConfirmDialog open={abandonConfirm} title="apagar este treino?" confirmLabel="apagar treino" tone="danger" onClose={() => setAbandonConfirm(false)} onConfirm={() => void abandon()} busy={actionBusy}>
+        <p>As séries e atividades deste treino em andamento serão removidas deste aparelho.</p>
+      </ConfirmDialog>
     </div>
   )
 }
@@ -448,19 +516,28 @@ function TimelinePage({ data, refresh, setNotice }: SharedProps) {
   const [filter, setFilter] = useState<'all' | 'milestones'>('all')
   const visible = data.timeline.filter((entry) => filter === 'all' || entry.isMilestone)
 
+  useEffect(() => {
+    if (!composer) return
+    const previous = document.body.style.overflow
+    document.body.style.overflow = 'hidden'
+    const focusFrame = window.requestAnimationFrame(() => document.querySelector<HTMLButtonElement>('.composer .icon-button')?.focus())
+    return () => { window.cancelAnimationFrame(focusFrame); document.body.style.overflow = previous }
+  }, [composer])
+
   const choosePhoto = async (event: ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0]
     if (!file) return
-    if (!file.type.startsWith('image/')) { setNotice('Escolha uma imagem compatível.'); return }
-    if (file.size > 8_000_000) { setNotice('Essa foto é grande demais. Escolha uma de até 8 MB.'); return }
+    if (!isSupportedImage(file)) { setNotice('Use uma foto em JPG, PNG ou WebP.'); event.target.value = ''; return }
+    if (file.size > 20_000_000) { setNotice('Essa foto é grande demais. Escolha uma de até 20 MB.'); event.target.value = ''; return }
     setPhotoBusy(true)
     try {
       const processed = await compressImage(file)
+      await ensureImageLoads(processed)
       setImageDataUrl(processed)
       setNotice('Foto pronta para guardar.')
     } catch {
       setImageDataUrl(undefined)
-      setNotice('Não conseguimos preparar esta foto. Tente JPG, PNG ou WebP.')
+      setNotice('Não conseguimos abrir esta foto. Tente outra em JPG, PNG ou WebP.')
     } finally {
       setPhotoBusy(false)
       event.target.value = ''
@@ -475,28 +552,32 @@ function TimelinePage({ data, refresh, setNotice }: SharedProps) {
       const saved = await db.timeline.get(entry.id)
       if (!saved || (imageDataUrl && !saved.imageDataUrl)) throw new Error('photo-not-persisted')
       await refresh(); setNote(''); setImageDataUrl(undefined); setComposer(false); setNotice('Guardado na sua linha.')
-    } catch {
-      setNotice('Não conseguimos guardar a foto. Seu treino continua salvo.')
+    } catch (error) {
+      const quotaReached = error instanceof DOMException && error.name === 'QuotaExceededError'
+      setNotice(quotaReached ? 'Não há espaço suficiente neste aparelho para guardar a foto.' : 'Não conseguimos guardar a foto. Seus outros registros continuam salvos.')
     }
   }
 
   return (
     <div className="page timeline-page">
-      <PageHeader eyebrow="só sua" title="minha linha" action={<button className="round-action small" aria-label="Adicionar à linha" onClick={() => setComposer(true)}><Plus /></button>} />
+      <PageHeader eyebrow="só sua" title="minha linha" />
       <div className="filter-row"><button className={filter === 'all' ? 'selected' : ''} onClick={() => setFilter('all')}>tudo</button><button className={filter === 'milestones' ? 'selected' : ''} onClick={() => setFilter('milestones')}>marcos</button></div>
-      {visible.length === 0 ? <SimpleEmpty icon={<NotebookPen />} title={filter === 'milestones' ? 'Nenhum marco ainda' : 'Sua linha começa aqui'} text={filter === 'milestones' ? 'Você escolhe o que merece ficar em destaque.' : 'Treinos, notas e fotos vão formar sua história.'} action={filter === 'all' && <button className="secondary-button" onClick={() => setComposer(true)}>fazer uma anotação</button>} /> : (
+      {visible.length === 0 ? <SimpleEmpty icon={<NotebookPen />} title={filter === 'milestones' ? 'Nenhum marco ainda' : 'Sua linha começa aqui'} text={filter === 'milestones' ? 'Você escolhe o que merece ficar em destaque.' : 'Use o + para guardar notas e fotos na sua história.'} /> : (
         <div className="timeline-rail">
           {visible.map((entry) => <TimelineItem key={entry.id} entry={entry} refresh={refresh} setNotice={setNotice} />)}
         </div>
       )}
-      {composer && <div className="sheet-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) setComposer(false) }}><form className="bottom-sheet composer" onSubmit={(event) => void saveEntry(event)}><div className="sheet-handle" /><header><h2>guardar na linha</h2><button type="button" className="icon-button" aria-label="Fechar" onClick={() => setComposer(false)}><X /></button></header>{photoBusy && <div className="photo-processing" role="status">preparando sua foto…</div>}{imageDataUrl && <div className="photo-ready"><img className="composer-preview" src={imageDataUrl} alt="Prévia da foto escolhida" /><button type="button" aria-label="Remover foto escolhida" onClick={() => setImageDataUrl(undefined)}><X size={17} /></button></div>}<textarea autoFocus={!imageDataUrl} value={note} onChange={(event) => setNote(event.target.value)} placeholder="O que você quer lembrar?" aria-label="Anotação" /><div className="composer-actions"><label className="secondary-button file-button"><ImagePlus size={18} /> {imageDataUrl ? 'trocar foto' : 'foto'}<input type="file" accept="image/jpeg,image/png,image/webp,image/heic,image/heif" onChange={(event) => void choosePhoto(event)} /></label><button className="primary-button" disabled={photoBusy || (!note.trim() && !imageDataUrl)}>guardar</button></div><p className="privacy-note"><Info size={15} /> A foto fica neste aparelho.</p></form></div>}
+      <FloatingAddButton tone="pink" label="Adicionar à linha" onClick={() => setComposer(true)} />
+      {composer && <div className="sheet-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) setComposer(false) }}><form className="bottom-sheet composer" onSubmit={(event) => void saveEntry(event)}><div className="sheet-handle" /><header><h2>guardar na linha</h2><button type="button" className="icon-button" aria-label="Fechar" onClick={() => setComposer(false)}><X /></button></header>{photoBusy && <div className="photo-processing" role="status">preparando sua foto…</div>}{imageDataUrl && <div className="photo-ready"><img className="composer-preview" src={imageDataUrl} alt="Prévia da foto escolhida" onError={() => { setImageDataUrl(undefined); setNotice('Esta foto não pôde ser exibida. Tente outra imagem.') }} /><button type="button" aria-label="Remover foto escolhida" onClick={() => setImageDataUrl(undefined)}><X size={17} /></button></div>}<textarea value={note} onChange={(event) => setNote(event.target.value)} placeholder="O que você quer lembrar?" aria-label="Anotação" /><div className="composer-actions"><label className="secondary-button file-button"><ImagePlus size={18} /> {imageDataUrl ? 'trocar foto' : 'foto'}<input type="file" accept="image/jpeg,image/png,image/webp" onChange={(event) => void choosePhoto(event)} /></label><button className="primary-button" disabled={photoBusy || (!note.trim() && !imageDataUrl)}>guardar</button></div><p className="privacy-note"><Info size={15} /> A foto é otimizada e fica neste aparelho.</p></form></div>}
     </div>
   )
 }
 
 function TimelineItem({ entry, refresh, setNotice }: { entry: TimelineEntry; refresh: () => Promise<void>; setNotice: (message: string) => void }) {
+  const [removeConfirm, setRemoveConfirm] = useState(false)
+  const [imageFailed, setImageFailed] = useState(false)
   const toggleMilestone = async () => { await db.timeline.put({ ...entry, isMilestone: !entry.isMilestone }); await refresh(); setNotice(entry.isMilestone ? 'Marco removido.' : 'Virou um marco seu.') }
-  const remove = async () => { if (!window.confirm('Remover este registro da sua linha?')) return; await db.timeline.delete(entry.id); await refresh(); setNotice('Registro removido.') }
+  const remove = async () => { await db.timeline.delete(entry.id); await refresh(); setNotice('Registro removido.') }
   return (
     <article className={`timeline-entry ${entry.isMilestone ? 'milestone' : ''}`}>
       <div className="timeline-dot">{entry.kind === 'workout' ? <Dumbbell size={16} /> : entry.kind === 'photo' ? <ImagePlus size={16} /> : <PencilLine size={16} />}</div>
@@ -505,9 +586,11 @@ function TimelineItem({ entry, refresh, setNotice }: { entry: TimelineEntry; ref
         {entry.isMilestone && <p className="milestone-label"><Star size={14} fill="currentColor" /> meu marco</p>}
         <h2>{entry.title}</h2>
         {entry.text && <p>{entry.text}</p>}
-        {entry.imageDataUrl && <img src={entry.imageDataUrl} alt={entry.text ? `Foto: ${entry.text}` : 'Foto pessoal sem descrição'} />}
-        <div className="entry-actions"><button onClick={() => void toggleMilestone()}><Star size={16} fill={entry.isMilestone ? 'currentColor' : 'none'} /> {entry.isMilestone ? 'desmarcar' : 'marcar'}</button><button onClick={() => void remove()}><Trash2 size={16} /> remover</button></div>
+        {entry.imageDataUrl && !imageFailed && <img src={entry.imageDataUrl} alt={entry.text ? `Foto: ${entry.text}` : 'Foto pessoal sem descrição'} onError={() => setImageFailed(true)} />}
+        {entry.imageDataUrl && imageFailed && <div className="photo-unavailable"><ImagePlus size={20} /><span>Esta foto não está disponível.</span></div>}
+        <div className="entry-actions"><button onClick={() => void toggleMilestone()}><Star size={16} fill={entry.isMilestone ? 'currentColor' : 'none'} /> {entry.isMilestone ? 'desmarcar' : 'marcar'}</button><button onClick={() => setRemoveConfirm(true)}><Trash2 size={16} /> remover</button></div>
       </div>
+      <ConfirmDialog open={removeConfirm} title="remover da sua linha?" confirmLabel="remover registro" tone="danger" onClose={() => setRemoveConfirm(false)} onConfirm={() => void remove()}><p>Este registro será apagado deste aparelho.</p></ConfirmDialog>
     </article>
   )
 }
@@ -523,9 +606,16 @@ function ExercisesPage({ data, refresh, setNotice, allExercises, allTemplates }:
     if (data.favorites.includes(id)) await db.favorites.delete(id); else await db.favorites.put({ exerciseId: id })
     await refresh()
   }
+  useEffect(() => {
+    if (!creating && !creatingTemplate) return
+    const previous = document.body.style.overflow
+    document.body.style.overflow = 'hidden'
+    const focusFrame = window.requestAnimationFrame(() => document.querySelector<HTMLButtonElement>('.bottom-sheet .icon-button')?.focus())
+    return () => { window.cancelAnimationFrame(focusFrame); document.body.style.overflow = previous }
+  }, [creating, creatingTemplate])
   return (
     <div className="page exercises-page">
-      <PageHeader eyebrow="para consultar e preparar" title="biblioteca" action={<button className="icon-button soft" aria-label={librarySection === 'exercises' ? 'Criar exercício pessoal' : 'Criar modelo de treino'} onClick={() => librarySection === 'exercises' ? setCreating(true) : setCreatingTemplate(true)}><Plus /></button>} />
+      <PageHeader eyebrow="para consultar e preparar" title="biblioteca" />
       <div className="library-tabs" role="tablist" aria-label="Conteúdo da biblioteca"><button role="tab" aria-selected={librarySection === 'exercises'} className={librarySection === 'exercises' ? 'selected' : ''} onClick={() => setLibrarySection('exercises')}>exercícios <small>{allExercises.length}</small></button><button role="tab" aria-selected={librarySection === 'templates'} className={librarySection === 'templates' ? 'selected' : ''} onClick={() => setLibrarySection('templates')}>modelos <small>{allTemplates.length}</small></button></div>
       {librarySection === 'exercises' ? <>
         <label className="search-field prominent"><Search size={19} /><input placeholder="buscar pelo nome" value={query} onChange={(event) => setQuery(event.target.value)} /></label>
@@ -533,6 +623,7 @@ function ExercisesPage({ data, refresh, setNotice, allExercises, allTemplates }:
         <p className="result-count">{filtered.length} {filtered.length === 1 ? 'exercício' : 'exercícios'}</p>
         <div className="exercise-list">{filtered.map((exercise) => <div className="exercise-list-row" key={exercise.id}><NavLink to={`/exercicios/${exercise.id}`}><ExerciseVisual visual={exercise.visual} label={exercise.name} compact /><span><strong>{exercise.name}</strong><small>{exercise.group} · {exercise.equipment}{exercise.origin === 'custom' ? ' · pessoal' : ''}</small></span></NavLink><button className="icon-button small" aria-label={data.favorites.includes(exercise.id) ? `Desfavoritar ${exercise.name}` : `Favoritar ${exercise.name}`} onClick={() => void toggleFavorite(exercise.id)}><Heart size={19} fill={data.favorites.includes(exercise.id) ? 'currentColor' : 'none'} /></button></div>)}</div>
       </> : <div className="template-library"><p className="library-note">Modelos apenas preparam o treino. Você pode trocar ou remover qualquer exercício.</p>{allTemplates.map((template) => <article className="template-row" key={template.id}><span className="template-thread" /><div><p>{template.origin === 'custom' ? 'modelo pessoal' : 'modelo do app'}</p><h2>{template.name}</h2><small>{template.note}</small><div className="template-exercises">{template.exerciseIds.slice(0, 4).map((id) => <span key={id}>{allExercises.find((exercise) => exercise.id === id)?.name ?? 'Exercício removido'}</span>)}{template.exerciseIds.length > 4 && <span>+{template.exerciseIds.length - 4}</span>}</div></div></article>)}</div>}
+      <FloatingAddButton tone="blue" label={librarySection === 'exercises' ? 'Criar exercício pessoal' : 'Criar modelo de treino'} onClick={() => librarySection === 'exercises' ? setCreating(true) : setCreatingTemplate(true)} />
       {creating && <CustomExerciseSheet onClose={() => setCreating(false)} onSaved={async () => { await refresh(); setCreating(false); setNotice('Exercício pessoal criado.') }} />}
       {creatingTemplate && <TemplateSheet exercises={allExercises} onClose={() => setCreatingTemplate(false)} onSaved={async () => { await refresh(); setCreatingTemplate(false); setNotice('Modelo pessoal criado.') }} />}
     </div>
@@ -548,7 +639,15 @@ function CustomExerciseSheet({ onClose, onSaved }: { onClose: () => void; onSave
     event.preventDefault(); if (!name.trim()) return
     await db.customExercises.put({ id: `custom-${makeId()}`, name: name.trim(), aliases: [], group, equipment: 'Personalizado', instructions: ['Registre aqui as observações que funcionam para você.'], origin: 'custom', category, metricMode, visual: category === 'strength' ? 'flow' : 'walk' }); await onSaved()
   }
-  return <div className="sheet-backdrop"><form className="bottom-sheet" onSubmit={(event) => void submit(event)}><div className="sheet-handle" /><header><h2>novo exercício</h2><button type="button" className="icon-button" aria-label="Fechar" onClick={onClose}><X /></button></header><label className="field"><span>nome</span><input autoFocus value={name} onChange={(event) => setName(event.target.value)} placeholder="ex.: passada no step" /></label><label className="field"><span>tipo</span><select value={category} onChange={(event) => { const next = event.target.value as ActivityCategory; setCategory(next); setMetricMode(next === 'strength' ? 'load-reps' : 'time-only') }}><option value="strength">Musculação</option><option value="cardio">Cardio</option><option value="other">Outra atividade</option></select></label><label className="field"><span>como registrar</span><select value={metricMode} onChange={(event) => setMetricMode(event.target.value as MetricMode)}>{category === 'strength' ? <><option value="load-reps">Carga e repetições</option><option value="reps-only">Somente repetições</option><option value="time-only">Somente tempo</option></> : <><option value="distance-time">Distância e tempo</option><option value="time-only">Somente tempo</option></>}</select></label><label className="field"><span>grupo principal</span><select value={group} onChange={(event) => setGroup(event.target.value)}>{exerciseGroups.filter((value) => value !== 'Todos').map((value) => <option key={value}>{value}</option>)}</select></label><button className="primary-button wide" disabled={!name.trim()}>criar exercício</button></form></div>
+  return <div className="sheet-backdrop"><form className="bottom-sheet" onSubmit={(event) => void submit(event)}>
+    <div className="sheet-handle" />
+    <header><h2>novo exercício</h2><button type="button" className="icon-button" aria-label="Fechar" onClick={onClose}><X /></button></header>
+    <label className="field"><span>nome</span><input value={name} onChange={(event) => setName(event.target.value)} placeholder="ex.: passada no step" /></label>
+    <label className="field"><span>tipo</span><select value={category} onChange={(event) => { const next = event.target.value as ActivityCategory; setCategory(next); setMetricMode(next === 'strength' ? 'load-reps' : 'time-only') }}><option value="strength">Musculação</option><option value="cardio">Cardio</option><option value="other">Outra atividade</option></select></label>
+    <label className="field"><span>como registrar</span><select value={metricMode} onChange={(event) => setMetricMode(event.target.value as MetricMode)}>{category === 'strength' ? <><option value="load-reps">Carga e repetições</option><option value="reps-only">Somente repetições</option><option value="time-only">Somente tempo</option></> : <><option value="distance-time">Distância e tempo</option><option value="time-only">Somente tempo</option></>}</select></label>
+    <label className="field"><span>grupo principal</span><select value={group} onChange={(event) => setGroup(event.target.value)}>{exerciseGroups.filter((value) => value !== 'Todos').map((value) => <option key={value}>{value}</option>)}</select></label>
+    <button className="primary-button wide" disabled={!name.trim()}>criar exercício</button>
+  </form></div>
 }
 
 function TemplateSheet({ exercises, onClose, onSaved }: { exercises: Exercise[]; onClose: () => void; onSaved: () => Promise<void> }) {
@@ -561,7 +660,15 @@ function TemplateSheet({ exercises, onClose, onSaved }: { exercises: Exercise[];
     event.preventDefault(); if (!name.trim() || selected.length === 0) return
     await db.customTemplates.put({ id: `template-custom-${makeId()}`, name: name.trim(), note: `${selected.length} ${selected.length === 1 ? 'exercício' : 'exercícios'} · pessoal`, exerciseIds: selected, origin: 'custom' }); await onSaved()
   }
-  return <div className="sheet-backdrop"><form className="bottom-sheet template-sheet" onSubmit={(event) => void submit(event)}><div className="sheet-handle" /><header><h2>novo modelo</h2><button type="button" className="icon-button" aria-label="Fechar" onClick={onClose}><X /></button></header><label className="field"><span>nome do modelo</span><input autoFocus value={name} onChange={(event) => setName(event.target.value)} placeholder="ex.: pernas de terça" /></label><label className="search-field"><Search size={18} /><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="buscar para adicionar" /></label><p className="selection-count">{selected.length} selecionado{selected.length === 1 ? '' : 's'}</p><div className="template-pick-list">{available.map((exercise) => <label key={exercise.id}><input type="checkbox" checked={selected.includes(exercise.id)} onChange={() => toggle(exercise.id)} /><ExerciseVisual visual={exercise.visual} label={exercise.name} compact /><span>{exercise.name}</span><Check size={17} /></label>)}</div><button className="primary-button wide" disabled={!name.trim() || selected.length === 0}>guardar modelo</button></form></div>
+  return <div className="sheet-backdrop"><form className="bottom-sheet template-sheet" onSubmit={(event) => void submit(event)}>
+    <div className="sheet-handle" />
+    <header><h2>novo modelo</h2><button type="button" className="icon-button" aria-label="Fechar" onClick={onClose}><X /></button></header>
+    <label className="field"><span>nome do modelo</span><input value={name} onChange={(event) => setName(event.target.value)} placeholder="ex.: pernas de terça" /></label>
+    <label className="search-field"><Search size={18} /><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="buscar para adicionar" /></label>
+    <p className="selection-count">{selected.length} selecionado{selected.length === 1 ? '' : 's'}</p>
+    <div className="template-pick-list">{available.map((exercise) => <label key={exercise.id}><input type="checkbox" checked={selected.includes(exercise.id)} onChange={() => toggle(exercise.id)} /><ExerciseVisual visual={exercise.visual} label={exercise.name} compact /><span>{exercise.name}</span><Check size={17} /></label>)}</div>
+    <button className="primary-button wide" disabled={!name.trim() || selected.length === 0}>guardar modelo</button>
+  </form></div>
 }
 
 function ExerciseDetail({ allExercises, data, refresh }: { allExercises: Exercise[]; data: AppSnapshot; refresh: () => Promise<void> }) {
@@ -583,6 +690,9 @@ function EvolutionPage({ data, allExercises }: { data: AppSnapshot; allExercises
 
 function ProfilePage({ data, refresh, setNotice }: SharedProps) {
   const [profile, setLocalProfile] = useState(data.profile)
+  const [pendingBackup, setPendingBackup] = useState<{ data: AppSnapshot }>()
+  const [eraseConfirm, setEraseConfirm] = useState(false)
+  const [dataActionBusy, setDataActionBusy] = useState(false)
   const fileRef = useRef<HTMLInputElement>(null)
   const persistProfile = async (next: Profile) => { setLocalProfile(next); await saveProfile(next); await refresh() }
   const displayWeight = profile.bodyWeightKg === undefined ? undefined : profile.loadUnit === 'kg' ? profile.bodyWeightKg : kgToLb(profile.bodyWeightKg)
@@ -590,28 +700,89 @@ function ProfilePage({ data, refresh, setNotice }: SharedProps) {
   const exportData = async () => {
     const backup = { app: 'treino-de-garota', schemaVersion: 2, exportedAt: new Date().toISOString(), data }
     const url = URL.createObjectURL(new Blob([JSON.stringify(backup, null, 2)], { type: 'application/json' }))
-    const anchor = document.createElement('a'); anchor.href = url; anchor.download = `treino-de-garota-${new Date().toISOString().slice(0, 10)}.json`; anchor.click(); URL.revokeObjectURL(url); setNotice('Backup baixado.')
+    const anchor = document.createElement('a')
+    anchor.href = url
+    anchor.download = `treino-de-garota-${new Date().toISOString().slice(0, 10)}.json`
+    anchor.click()
+    URL.revokeObjectURL(url)
+    setNotice('Backup baixado.')
   }
   const importData = async (event: ChangeEvent<HTMLInputElement>) => {
-    const file = event.target.files?.[0]; if (!file) return
+    const file = event.target.files?.[0]
+    if (!file) return
     try {
       const backup = JSON.parse(await file.text()) as { app?: string; schemaVersion?: number; data?: AppSnapshot }
       if (backup.app !== 'treino-de-garota' || ![1, 2].includes(backup.schemaVersion ?? 0) || !backup.data) throw new Error('invalid')
-      if (!window.confirm('Substituir os dados deste aparelho pelos dados do backup?')) return
-      const importedWorkouts = backup.data.workouts.map(normalizeWorkout)
-      const importedExercises = backup.data.customExercises.map(normalizeCustomExercise)
-      await clearAllData()
-      await db.transaction('rw', [db.workouts, db.timeline, db.favorites, db.customExercises, db.customTemplates, db.profiles], async () => {
-        await db.workouts.bulkPut(importedWorkouts); await db.timeline.bulkPut(backup.data!.timeline); await db.favorites.bulkPut(backup.data!.favorites.map((exerciseId) => ({ exerciseId }))); await db.customExercises.bulkPut(importedExercises); await db.customTemplates.bulkPut(backup.data!.customTemplates ?? []); await db.profiles.put({ ...defaultProfile, ...backup.data!.profile })
-      })
-      await refresh(); setNotice('Backup restaurado.')
-    } catch { setNotice('Este arquivo não é um backup válido.') } finally { event.target.value = '' }
+      setPendingBackup({ data: backup.data })
+    } catch {
+      setNotice('Este arquivo não é um backup válido.')
+    } finally {
+      event.target.value = ''
+    }
+  }
+  const restoreBackup = async () => {
+    if (!pendingBackup) return
+    setDataActionBusy(true)
+    const importedWorkouts = pendingBackup.data.workouts.map(normalizeWorkout)
+    const importedExercises = pendingBackup.data.customExercises.map(normalizeCustomExercise)
+    await clearAllData()
+    await db.transaction('rw', [db.workouts, db.timeline, db.favorites, db.customExercises, db.customTemplates, db.profiles], async () => {
+      await db.workouts.bulkPut(importedWorkouts)
+      await db.timeline.bulkPut(pendingBackup.data.timeline)
+      await db.favorites.bulkPut(pendingBackup.data.favorites.map((exerciseId) => ({ exerciseId })))
+      await db.customExercises.bulkPut(importedExercises)
+      await db.customTemplates.bulkPut(pendingBackup.data.customTemplates ?? [])
+      await db.profiles.put({ ...defaultProfile, ...pendingBackup.data.profile })
+    })
+    setPendingBackup(undefined)
+    setDataActionBusy(false)
+    await refresh()
+    setNotice('Backup restaurado.')
   }
   const erase = async () => {
-    if (!window.confirm('Apagar todos os treinos, fotos, notas e preferências deste aparelho? Esta ação não pode ser desfeita.')) return
-    await clearAllData(); await saveProfile({ ...defaultProfile, onboarded: true }); await refresh(); setNotice('Dados apagados deste aparelho.')
+    setDataActionBusy(true)
+    await clearAllData()
+    await saveProfile({ ...defaultProfile, onboarded: true })
+    setEraseConfirm(false)
+    setDataActionBusy(false)
+    await refresh()
+    setNotice('Dados apagados deste aparelho.')
   }
-  return <div className="page profile-page"><PageHeader eyebrow="seu espaço" title="eu" /><section className="profile-intro"><div className="avatar-soft"><UserRound /></div><label><span>como quer ser chamada?</span><input value={profile.nickname} placeholder="seu apelido" onBlur={() => void persistProfile(profile)} onChange={(event) => setLocalProfile({ ...profile, nickname: event.target.value })} /></label></section><section className="settings-section"><h2>preferências</h2><div className="setting-row"><span><strong>unidade de carga</strong><small>usada nos próximos registros</small></span><div className="segmented small"><button className={profile.loadUnit === 'kg' ? 'selected' : ''} onClick={() => void persistProfile({ ...profile, loadUnit: 'kg' })}>kg</button><button className={profile.loadUnit === 'lb' ? 'selected' : ''} onClick={() => void persistProfile({ ...profile, loadUnit: 'lb' })}>lb</button></div></div><div className="setting-row"><span><strong>peso na linha</strong><small>permite registros de peso corporal</small></span><button className={profile.bodyWeightEnabled ? 'switch on' : 'switch'} role="switch" aria-label="Permitir peso corporal na linha" aria-checked={profile.bodyWeightEnabled} onClick={() => void persistProfile({ ...profile, bodyWeightEnabled: !profile.bodyWeightEnabled })}><i /></button></div></section><details className="health-details"><summary><span><strong>corpo e contexto de saúde</strong><small>tudo opcional</small></span><ChevronRight size={19} /></summary><div className="health-fields"><p className="sensitive-note"><Info size={16} /> Estes dados ficam no aparelho e ainda não mudam sugestões do app.</p><div className="profile-number-grid"><label><span>peso ({profile.loadUnit})</span><LocalizedNumberInput value={displayWeight} label={`Peso corporal em ${profile.loadUnit}`} onCommit={(value) => void persistProfile({ ...profile, bodyWeightKg: value === undefined ? undefined : profile.loadUnit === 'kg' ? value : lbToKg(value) })} /></label><label><span>altura (cm)</span><LocalizedNumberInput value={profile.heightCm} label="Altura em centímetros" onCommit={(value) => void persistProfile({ ...profile, heightCm: value })} /></label></div><div className="setting-row"><span><strong>mostrar IMC</strong><small>calculado só com peso e altura</small></span><button className={profile.showBmi ? 'switch on' : 'switch'} role="switch" aria-label="Mostrar IMC" aria-checked={Boolean(profile.showBmi)} onClick={() => void persistProfile({ ...profile, showBmi: !profile.showBmi })}><i /></button></div>{profile.showBmi && <div className="bmi-line"><span>IMC</span><strong>{bmi === undefined ? 'preencha peso e altura' : formatLocalizedNumber(bmi)}</strong><small>Informativo, sem classificação ou diagnóstico.</small></div>}<label className="profile-number-field"><span>duração média do ciclo (dias)</span><LocalizedNumberInput value={profile.menstrualCycleDays} label="Duração média do ciclo menstrual em dias" onCommit={(value) => void persistProfile({ ...profile, menstrualCycleDays: value })} /></label><label className="field"><span>gravidez</span><select value={profile.pregnancyStatus ?? ''} onChange={(event) => void persistProfile({ ...profile, pregnancyStatus: event.target.value ? event.target.value as Profile['pregnancyStatus'] : undefined })}><option value="">Prefiro não informar</option><option value="pregnant">Estou grávida</option><option value="not-pregnant">Não estou grávida</option></select></label></div></details><section className="data-section"><p className="eyebrow">seus dados</p><h2>ficam neste aparelho</h2><p>Faça um backup para levar sua história com você ou recuperar depois.</p><button className="data-action" onClick={() => void exportData()}><Download /><span><strong>baixar backup</strong><small>treinos, notas, fotos, modelos e preferências</small></span><ChevronRight /></button><button className="data-action" onClick={() => fileRef.current?.click()}><Upload /><span><strong>restaurar backup</strong><small>substitui os dados deste aparelho</small></span><ChevronRight /></button><input ref={fileRef} hidden type="file" accept="application/json" onChange={(event) => void importData(event)} /><button className="danger-action" onClick={() => void erase()}><Trash2 size={18} /> apagar todos os dados</button></section><footer className="app-footer"><span className="brand-mark small">tg</span><p>treino de garota · primeiro diário</p></footer></div>
+  return <>
+    <div className="page profile-page">
+      <PageHeader eyebrow="seu espaço" title="eu" />
+      <section className="profile-intro">
+        <div className="avatar-soft"><UserRound /></div>
+        <label><span>como quer ser chamada?</span><input value={profile.nickname} placeholder="seu apelido" onBlur={() => void persistProfile(profile)} onChange={(event) => setLocalProfile({ ...profile, nickname: event.target.value })} /></label>
+      </section>
+      <section className="settings-section">
+        <h2>preferências</h2>
+        <div className="setting-row"><span><strong>unidade de carga</strong><small>usada nos próximos registros</small></span><div className="segmented small"><button className={profile.loadUnit === 'kg' ? 'selected' : ''} onClick={() => void persistProfile({ ...profile, loadUnit: 'kg' })}>kg</button><button className={profile.loadUnit === 'lb' ? 'selected' : ''} onClick={() => void persistProfile({ ...profile, loadUnit: 'lb' })}>lb</button></div></div>
+        <div className="setting-row"><span><strong>peso na linha</strong><small>permite registros de peso corporal</small></span><button className={profile.bodyWeightEnabled ? 'switch on' : 'switch'} role="switch" aria-label="Permitir peso corporal na linha" aria-checked={profile.bodyWeightEnabled} onClick={() => void persistProfile({ ...profile, bodyWeightEnabled: !profile.bodyWeightEnabled })}><i /></button></div>
+      </section>
+      <details className="health-details">
+        <summary><span><strong>corpo e contexto de saúde</strong><small>tudo opcional</small></span><ChevronRight size={19} /></summary>
+        <div className="health-fields">
+          <p className="sensitive-note"><Info size={16} /> Estes dados ficam no aparelho e ainda não mudam sugestões do app.</p>
+          <div className="profile-number-grid"><label><span>peso ({profile.loadUnit})</span><LocalizedNumberInput value={displayWeight} label={`Peso corporal em ${profile.loadUnit}`} onCommit={(value) => void persistProfile({ ...profile, bodyWeightKg: value === undefined ? undefined : profile.loadUnit === 'kg' ? value : lbToKg(value) })} /></label><label><span>altura (cm)</span><LocalizedNumberInput value={profile.heightCm} label="Altura em centímetros" onCommit={(value) => void persistProfile({ ...profile, heightCm: value })} /></label></div>
+          <div className="setting-row"><span><strong>mostrar IMC</strong><small>calculado só com peso e altura</small></span><button className={profile.showBmi ? 'switch on' : 'switch'} role="switch" aria-label="Mostrar IMC" aria-checked={Boolean(profile.showBmi)} onClick={() => void persistProfile({ ...profile, showBmi: !profile.showBmi })}><i /></button></div>
+          {profile.showBmi && <div className="bmi-line"><span>IMC</span><strong>{bmi === undefined ? 'preencha peso e altura' : formatLocalizedNumber(bmi)}</strong><small>Informativo, sem classificação ou diagnóstico.</small></div>}
+          <label className="profile-number-field"><span>duração média do ciclo (dias)</span><LocalizedNumberInput value={profile.menstrualCycleDays} label="Duração média do ciclo menstrual em dias" onCommit={(value) => void persistProfile({ ...profile, menstrualCycleDays: value })} /></label>
+          <label className="field"><span>gravidez</span><select value={profile.pregnancyStatus ?? ''} onChange={(event) => void persistProfile({ ...profile, pregnancyStatus: event.target.value ? event.target.value as Profile['pregnancyStatus'] : undefined })}><option value="">Prefiro não informar</option><option value="pregnant">Estou grávida</option><option value="not-pregnant">Não estou grávida</option></select></label>
+        </div>
+      </details>
+      <section className="data-section">
+        <p className="eyebrow">seus dados</p><h2>ficam neste aparelho</h2><p>Faça um backup para levar sua história com você ou recuperar depois.</p>
+        <button className="data-action" onClick={() => void exportData()}><Download /><span><strong>baixar backup</strong><small>treinos, notas, fotos, modelos e preferências</small></span><ChevronRight /></button>
+        <button className="data-action" onClick={() => fileRef.current?.click()}><Upload /><span><strong>restaurar backup</strong><small>substitui os dados deste aparelho</small></span><ChevronRight /></button>
+        <input ref={fileRef} hidden type="file" accept="application/json" onChange={(event) => void importData(event)} />
+        <button className="danger-action" onClick={() => setEraseConfirm(true)}><Trash2 size={18} /> apagar todos os dados</button>
+      </section>
+      <footer className="app-footer"><span className="brand-mark small">tg</span><p>treino de garota · primeiro diário</p></footer>
+    </div>
+    <ConfirmDialog open={Boolean(pendingBackup)} title="restaurar este backup?" confirmLabel="restaurar backup" onClose={() => setPendingBackup(undefined)} onConfirm={() => void restoreBackup()} busy={dataActionBusy}><p>Os dados atuais deste aparelho serão substituídos pelo conteúdo do arquivo.</p></ConfirmDialog>
+    <ConfirmDialog open={eraseConfirm} title="apagar todos os dados?" confirmLabel="apagar tudo" tone="danger" onClose={() => setEraseConfirm(false)} onConfirm={() => void erase()} busy={dataActionBusy}><p>Treinos, fotos, notas, modelos e preferências serão removidos deste aparelho. Esta ação não pode ser desfeita.</p></ConfirmDialog>
+  </>
 }
 
 function WorkoutDetail({ data }: { data: AppSnapshot }) {
@@ -632,29 +803,50 @@ function TimelinePathIcon({ size = 21 }: { size?: number }) {
   return <svg width={size} height={size} viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M4.5 4.5h10a4 4 0 0 1 0 8h-5a3.5 3.5 0 0 0 0 7h10" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" /><circle cx="4.5" cy="4.5" r="2.1" fill="currentColor" /><circle cx="10" cy="4.5" r="1.8" fill="var(--white)" stroke="currentColor" strokeWidth="1.5" /><circle cx="14.5" cy="12.5" r="1.8" fill="var(--white)" stroke="currentColor" strokeWidth="1.5" /><circle cx="9.5" cy="19.5" r="1.8" fill="var(--white)" stroke="currentColor" strokeWidth="1.5" /><circle cx="19.5" cy="19.5" r="2.1" fill="currentColor" /></svg>
 }
 
+function FloatingAddButton({ tone, label, onClick }: { tone: 'pink' | 'blue'; label: string; onClick: () => void }) {
+  return <button className={`floating-add ${tone}`} aria-label={label} onClick={onClick}><Plus size={27} /></button>
+}
+
+function ConfirmDialog({ open, title, confirmLabel, tone = 'default', busy = false, onClose, onConfirm, children }: { open: boolean; title: string; confirmLabel: string; tone?: 'default' | 'danger'; busy?: boolean; onClose: () => void; onConfirm: () => void; children: ReactNode }) {
+  const titleId = useId()
+  useEffect(() => {
+    if (!open) return
+    const previousOverflow = document.body.style.overflow
+    document.body.style.overflow = 'hidden'
+    const onKeyDown = (event: KeyboardEvent) => { if (event.key === 'Escape' && !busy) onClose() }
+    window.addEventListener('keydown', onKeyDown)
+    return () => {
+      document.body.style.overflow = previousOverflow
+      window.removeEventListener('keydown', onKeyDown)
+    }
+  }, [open, busy, onClose])
+  if (!open) return null
+  return <div className="dialog-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget && !busy) onClose() }}><section className="confirm-dialog" role="dialog" aria-modal="true" aria-labelledby={titleId}><span className={`dialog-stroke ${tone}`} aria-hidden="true" /><h2 id={titleId}>{title}</h2><div className="dialog-copy">{children}</div><div className="dialog-actions"><button className="dialog-cancel" autoFocus disabled={busy} onClick={onClose}>voltar</button><button className={tone === 'danger' ? 'dialog-confirm danger' : 'dialog-confirm'} disabled={busy} onClick={onConfirm}>{busy ? 'aguarde…' : confirmLabel}</button></div></section></div>
+}
+
 function SimpleEmpty({ icon, title, text, action }: { icon: ReactNode; title: string; text?: string; action?: ReactNode }) {
   return <section className="simple-empty"><div className="soft-orbit">{icon}</div><h2>{title}</h2>{text && <p>{text}</p>}{action}</section>
 }
 
 async function compressImage(file: File): Promise<string> {
-  const source = await readFileAsDataUrl(file)
+  const source = URL.createObjectURL(file)
   try {
-    const image = await createImageBitmap(file, { imageOrientation: 'from-image' })
-    const result = drawCompressedImage(image, image.width, image.height)
-    image.close()
-    return result
-  } catch {
     try {
-      const image = await new Promise<HTMLImageElement>((resolve, reject) => { const img = new Image(); img.onload = () => resolve(img); img.onerror = reject; img.src = source })
-      return drawCompressedImage(image, image.naturalWidth, image.naturalHeight)
+      const image = await createImageBitmap(file, { imageOrientation: 'from-image' })
+      const result = await drawCompressedImage(image, image.width, image.height)
+      image.close()
+      return result
     } catch {
-      if (file.size <= 3_000_000) return source
-      throw new Error('unsupported-image')
+      const image = await ensureImageLoads(source)
+      return await drawCompressedImage(image, image.naturalWidth, image.naturalHeight)
     }
+  } finally {
+    URL.revokeObjectURL(source)
   }
 }
 
-function drawCompressedImage(image: CanvasImageSource, width: number, height: number) {
+async function drawCompressedImage(image: CanvasImageSource, width: number, height: number) {
+  if (width <= 0 || height <= 0) throw new Error('invalid-image-size')
   const max = 1400
   const scale = Math.min(1, max / Math.max(width, height))
   const canvas = document.createElement('canvas')
@@ -665,13 +857,27 @@ function drawCompressedImage(image: CanvasImageSource, width: number, height: nu
   context.fillStyle = '#fffdf8'
   context.fillRect(0, 0, canvas.width, canvas.height)
   context.drawImage(image, 0, 0, canvas.width, canvas.height)
-  const result = canvas.toDataURL('image/jpeg', .8)
-  if (result === 'data:,') throw new Error('empty-image')
-  return result
+  const blob = await new Promise<Blob>((resolve, reject) => canvas.toBlob((value) => value ? resolve(value) : reject(new Error('empty-image')), 'image/jpeg', .8))
+  return readFileAsDataUrl(blob)
 }
 
-function readFileAsDataUrl(file: File) {
+function readFileAsDataUrl(file: Blob) {
   return new Promise<string>((resolve, reject) => { const reader = new FileReader(); reader.onload = () => resolve(String(reader.result)); reader.onerror = reject; reader.readAsDataURL(file) })
+}
+
+function ensureImageLoads(source: string) {
+  return new Promise<HTMLImageElement>((resolve, reject) => {
+    const image = new Image()
+    image.onload = () => image.naturalWidth > 0 && image.naturalHeight > 0 ? resolve(image) : reject(new Error('empty-image'))
+    image.onerror = () => reject(new Error('unsupported-image'))
+    image.src = source
+  })
+}
+
+function isSupportedImage(file: File) {
+  const supportedMime = ['image/jpeg', 'image/png', 'image/webp'].includes(file.type.toLocaleLowerCase())
+  const supportedExtension = /\.(jpe?g|png|webp)$/i.test(file.name)
+  return supportedMime || (!file.type && supportedExtension)
 }
 
 function formatSetSummary(set: WorkoutSet, mode: MetricMode, unit: Profile['loadUnit']) {
