@@ -27,11 +27,13 @@ import {
   X,
 } from 'lucide-react'
 import { HashRouter, NavLink, Route, Routes, useLocation, useNavigate, useParams } from 'react-router-dom'
+import { CURRENT_RELEASE, getInitialUpdateFlow, type AppRelease, type UpdateFlow } from './app-version'
 import { db, clearAllData, defaultProfile, loadSnapshot, saveProfile } from './db'
 import { exerciseGroups, exercises as systemExercises } from './data/exercises'
 import { systemTemplates } from './data/templates'
 import { calculateBmi, formatLocalizedNumber, isSetValid, kgToLb, lbToKg, parseLocalizedNumber } from './domain'
 import { ExerciseVisual } from './components/ExerciseVisual'
+import { applyAppUpdate } from './pwa-update'
 import { exerciseProgress, thisMonthCount, totalCompletedSets, workoutDurationMinutes } from './stats'
 import type { ActivityCategory, AppSnapshot, Exercise, Feeling, MetricMode, Profile, TimelineEntry, Workout, WorkoutItem, WorkoutSet, WorkoutTemplate } from './types'
 
@@ -59,7 +61,8 @@ function AppContent() {
   const [data, setData] = useState<AppSnapshot>(emptySnapshot)
   const [loading, setLoading] = useState(true)
   const [notice, setNotice] = useState('')
-  const [updateReady, setUpdateReady] = useState(false)
+  const [updateReady, setUpdateReady] = useState<{ target?: AppRelease }>()
+  const [updateFlow, setUpdateFlow] = useState<UpdateFlow>(getInitialUpdateFlow)
   const [installPrompt, setInstallPrompt] = useState<BeforeInstallPromptEvent>()
   const [showInstall, setShowInstall] = useState(false)
   const [showIosHelp, setShowIosHelp] = useState(false)
@@ -72,10 +75,30 @@ function AppContent() {
 
   useEffect(() => {
     void refresh()
-    const updateListener = () => setUpdateReady(true)
+    const updateListener = (event: Event) => setUpdateReady((event as CustomEvent<{ target?: AppRelease }>).detail ?? {})
+    const applyingListener = (event: Event) => {
+      const detail = (event as CustomEvent<{ target?: AppRelease }>).detail
+      setUpdateFlow({ phase: 'applying', target: detail?.target })
+    }
+    const stalledListener = (event: Event) => {
+      const detail = (event as CustomEvent<{ message?: string }>).detail
+      setUpdateFlow((current) => ({ ...current, phase: 'stalled', message: detail?.message }))
+    }
     window.addEventListener('tg:update-ready', updateListener)
-    return () => window.removeEventListener('tg:update-ready', updateListener)
+    window.addEventListener('tg:update-applying', applyingListener)
+    window.addEventListener('tg:update-stalled', stalledListener)
+    return () => {
+      window.removeEventListener('tg:update-ready', updateListener)
+      window.removeEventListener('tg:update-applying', applyingListener)
+      window.removeEventListener('tg:update-stalled', stalledListener)
+    }
   }, [])
+
+  useEffect(() => {
+    if (updateFlow.phase !== 'complete') return
+    const timer = window.setTimeout(() => setUpdateFlow({ phase: 'idle' }), 1100)
+    return () => window.clearTimeout(timer)
+  }, [updateFlow.phase])
 
   useEffect(() => {
     const iosNavigator = navigator as Navigator & { standalone?: boolean }
@@ -114,6 +137,10 @@ function AppContent() {
   const allExercises = useMemo(() => [...systemExercises, ...data.customExercises], [data.customExercises])
   const allTemplates = useMemo(() => [...systemTemplates, ...data.customTemplates], [data.customTemplates])
 
+  if (updateFlow.phase !== 'idle') {
+    return <AppUpdateScreen flow={updateFlow} onRetry={() => void applyAppUpdate(updateFlow.target)} />
+  }
+
   if (loading) {
     return <main className="loading-screen"><span className="brand-mark">tg</span><p>Abrindo seu diário…</p></main>
   }
@@ -129,8 +156,8 @@ function AppContent() {
       <a className="skip-link" href="#conteudo">Pular para o conteúdo</a>
       {updateReady && (
         <div className="update-banner" role="status">
-          <span>Uma versão nova está pronta.</span>
-          <button onClick={() => window.location.reload()}>Atualizar</button>
+          <span>{updateReady.target ? `Versão ${updateReady.target.version} pronta.` : 'Uma versão nova está pronta.'}</span>
+          <button onClick={() => void applyAppUpdate(updateReady.target)}>Atualizar</button>
         </div>
       )}
       {activeWorkout && !location.pathname.startsWith('/treino/ativo') && (
@@ -140,7 +167,7 @@ function AppContent() {
         </NavLink>
       )}
       {showInstall && <aside className={`install-nudge ${showNav ? '' : 'during-workout'}`} aria-label="Instalar aplicativo">
-        <div className="install-mark">tg</div>
+        <img className="install-mark" src={`${import.meta.env.BASE_URL}icon-192.png`} alt="" />
         <div><strong>levar o diário com você</strong><p>{showIosHelp ? 'No Safari, toque em Compartilhar e depois em “Adicionar à Tela de Início”.' : 'Instale para abrir rápido e usar offline.'}</p></div>
         {!showIosHelp && <button className="install-action" onClick={async () => {
           if (!installPrompt) { setShowIosHelp(true); return }
@@ -789,11 +816,32 @@ function ProfilePage({ data, refresh, setNotice }: SharedProps) {
         <input ref={fileRef} hidden type="file" accept="application/json" onChange={(event) => void importData(event)} />
         <button className="danger-action" onClick={() => setEraseConfirm(true)}><Trash2 size={18} /> apagar todos os dados</button>
       </section>
-      <footer className="app-footer"><span className="brand-mark small">tg</span><p>treino de garota · primeiro diário</p></footer>
+      <footer className="app-footer"><span className="brand-mark small">tg</span><p>treino de garota · versão {CURRENT_RELEASE.version}</p></footer>
     </div>
     <ConfirmDialog open={Boolean(pendingBackup)} title="restaurar este backup?" confirmLabel="restaurar backup" onClose={() => setPendingBackup(undefined)} onConfirm={() => void restoreBackup()} busy={dataActionBusy}><p>Os dados atuais deste aparelho serão substituídos pelo conteúdo do arquivo.</p></ConfirmDialog>
     <ConfirmDialog open={eraseConfirm} title="apagar todos os dados?" confirmLabel="apagar tudo" tone="danger" onClose={() => setEraseConfirm(false)} onConfirm={() => void erase()} busy={dataActionBusy}><p>Treinos, fotos, notas, modelos e preferências serão removidos deste aparelho. Esta ação não pode ser desfeita.</p></ConfirmDialog>
   </>
+}
+
+function AppUpdateScreen({ flow, onRetry }: { flow: UpdateFlow; onRetry: () => void }) {
+  const complete = flow.phase === 'complete'
+  const stalled = flow.phase === 'stalled'
+  const version = complete ? CURRENT_RELEASE.version : flow.target?.version
+  return <main className="app-update-screen" aria-live="polite" aria-busy={!complete && !stalled}>
+    <img src={`${import.meta.env.BASE_URL}icon-192.png`} alt="" />
+    {complete ? <span className="update-status-icon complete"><Check /></span> : stalled ? <span className="update-status-icon stalled"><RotateCcw /></span> : <span className="update-status-icon loading" />}
+    <div>
+      <p className="eyebrow">{complete ? 'tudo certo' : stalled ? 'a atualização pausou' : 'só um instante'}</p>
+      <h1>{complete ? 'Diário atualizado.' : stalled ? 'Vamos tentar de novo?' : 'Atualizando seu diário…'}</h1>
+      <p>{complete
+        ? `A versão ${CURRENT_RELEASE.version} foi confirmada.`
+        : stalled
+          ? flow.message ?? 'A nova versão ainda não foi confirmada.'
+          : version ? `Instalando a versão ${version}. Não feche o aplicativo.` : 'Instalando a nova versão. Não feche o aplicativo.'}</p>
+    </div>
+    {stalled && <button className="primary-button" onClick={onRetry}><RotateCcw size={18} /> tentar novamente</button>}
+    {!complete && <small>Seus treinos e fotos permanecem guardados neste aparelho.</small>}
+  </main>
 }
 
 function WorkoutDetail({ data }: { data: AppSnapshot }) {

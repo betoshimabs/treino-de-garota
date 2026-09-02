@@ -2,13 +2,51 @@ import { defineConfig } from 'vitest/config'
 import react from '@vitejs/plugin-react'
 import { VitePWA } from 'vite-plugin-pwa'
 
+declare const process: { env: Record<string, string | undefined> }
+
+const builtAt = new Date().toISOString()
+const packageVersion = process.env.npm_package_version ?? '0.1.0'
+const [major = '0', minor = '1'] = packageVersion.split('.')
+const runNumber = process.env.GITHUB_RUN_NUMBER
+const runAttempt = process.env.GITHUB_RUN_ATTEMPT ?? '1'
+const commit = process.env.GITHUB_SHA ?? 'local'
+const appVersion = runNumber
+  ? `${major}.${minor}.${runNumber}${runAttempt === '1' ? '' : `-r${runAttempt}`}`
+  : `${packageVersion}-dev`
+const appBuildId = runNumber
+  ? `${process.env.GITHUB_RUN_ID ?? runNumber}.${runAttempt}.${commit}`
+  : `local.${builtAt}`
+const release = { version: appVersion, buildId: appBuildId, builtAt }
+
 export default defineConfig({
   base: '/treino-de-garota/',
+  define: {
+    __APP_VERSION__: JSON.stringify(release.version),
+    __APP_BUILD_ID__: JSON.stringify(release.buildId),
+    __APP_BUILT_AT__: JSON.stringify(release.builtAt),
+  },
   plugins: [
     react(),
+    {
+      name: 'treino-de-garota-version',
+      generateBundle() {
+        this.emitFile({
+          type: 'asset',
+          fileName: 'version.json',
+          source: `${JSON.stringify(release, null, 2)}\n`,
+        })
+      },
+    },
     VitePWA({
       registerType: 'prompt',
-      includeAssets: ['brand-mark.svg', 'apple-touch-icon.png', 'icon-192.png', 'icon-512.png'],
+      includeAssets: [
+        'brand-mark.svg',
+        'favicon-32.png',
+        'apple-touch-icon.png',
+        'icon-192.png',
+        'icon-512.png',
+        'icon-512-maskable.png',
+      ],
       manifest: {
         name: 'Treino de Garota',
         short_name: 'treino',
@@ -31,13 +69,13 @@ export default defineConfig({
             src: 'icon-512.png',
             sizes: '512x512',
             type: 'image/png',
-            purpose: 'any maskable'
+            purpose: 'any'
           },
           {
-            src: 'brand-mark.svg',
-            sizes: 'any',
-            type: 'image/svg+xml',
-            purpose: 'any maskable'
+            src: 'icon-512-maskable.png',
+            sizes: '512x512',
+            type: 'image/png',
+            purpose: 'maskable'
           }
         ],
         lang: 'pt-BR'
