@@ -550,7 +550,18 @@ function TimelinePage({ data, refresh, setNotice }: SharedProps) {
     try {
       await db.timeline.put(entry)
       const saved = await db.timeline.get(entry.id)
-      if (!saved || (imageDataUrl && !saved.imageDataUrl)) throw new Error('photo-not-persisted')
+      if (!saved || (imageDataUrl && !saved.imageDataUrl)) {
+        await db.timeline.delete(entry.id)
+        throw new Error('photo-not-persisted')
+      }
+      if (saved.imageDataUrl) {
+        try {
+          await ensureImageLoads(saved.imageDataUrl)
+        } catch {
+          await db.timeline.delete(entry.id)
+          throw new Error('photo-invalid-after-save')
+        }
+      }
       await refresh(); setNote(''); setImageDataUrl(undefined); setComposer(false); setNotice('Guardado na sua linha.')
     } catch (error) {
       const quotaReached = error instanceof DOMException && error.name === 'QuotaExceededError'
@@ -847,7 +858,7 @@ async function compressImage(file: File): Promise<string> {
 
 async function drawCompressedImage(image: CanvasImageSource, width: number, height: number) {
   if (width <= 0 || height <= 0) throw new Error('invalid-image-size')
-  const max = 1400
+  const max = 1280
   const scale = Math.min(1, max / Math.max(width, height))
   const canvas = document.createElement('canvas')
   canvas.width = Math.max(1, Math.round(width * scale))
@@ -857,8 +868,17 @@ async function drawCompressedImage(image: CanvasImageSource, width: number, heig
   context.fillStyle = '#fffdf8'
   context.fillRect(0, 0, canvas.width, canvas.height)
   context.drawImage(image, 0, 0, canvas.width, canvas.height)
-  const blob = await new Promise<Blob>((resolve, reject) => canvas.toBlob((value) => value ? resolve(value) : reject(new Error('empty-image')), 'image/jpeg', .8))
+  const webp = await canvasToBlob(canvas, 'image/webp', .76)
+  const blob = webp.type.toLocaleLowerCase() === 'image/webp'
+    ? webp
+    : await canvasToBlob(canvas, 'image/jpeg', .78)
   return readFileAsDataUrl(blob)
+}
+
+function canvasToBlob(canvas: HTMLCanvasElement, type: string, quality: number) {
+  return new Promise<Blob>((resolve, reject) => {
+    canvas.toBlob((value) => value ? resolve(value) : reject(new Error('empty-image')), type, quality)
+  })
 }
 
 function readFileAsDataUrl(file: Blob) {
