@@ -38,7 +38,7 @@ export default defineConfig({
       },
     },
     VitePWA({
-      registerType: 'prompt',
+      registerType: 'autoUpdate',
       includeAssets: [
         'brand-mark.svg',
         'favicon-32.png',
@@ -83,6 +83,8 @@ export default defineConfig({
       workbox: {
         navigateFallback: 'index.html',
         cleanupOutdatedCaches: true,
+        skipWaiting: true,
+        clientsClaim: true,
         globPatterns: ['**/*.{js,css,html,svg,woff2}'],
         maximumFileSizeToCacheInBytes: 3_100_000
       }

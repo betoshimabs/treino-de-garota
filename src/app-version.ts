@@ -8,6 +8,7 @@ export type PendingUpdate = {
   target?: AppRelease
   fromBuildId: string
   startedAt: number
+  reloadAttempts?: number
 }
 
 export type UpdateFlow = {
@@ -23,6 +24,15 @@ export const CURRENT_RELEASE: AppRelease = {
 }
 
 const PENDING_UPDATE_KEY = 'tg-pending-update'
+
+function writePendingUpdate(pending: PendingUpdate) {
+  try {
+    sessionStorage.setItem(PENDING_UPDATE_KEY, JSON.stringify(pending))
+  } catch {
+    // A atualização ainda pode ocorrer; a confirmação volta a usar a troca do build em memória.
+  }
+  return pending
+}
 
 export function readPendingUpdate(): PendingUpdate | undefined {
   try {
@@ -41,13 +51,20 @@ export function storePendingUpdate(target?: AppRelease) {
     target,
     fromBuildId: CURRENT_RELEASE.buildId,
     startedAt: Date.now(),
+    reloadAttempts: 0,
   }
-  try {
-    sessionStorage.setItem(PENDING_UPDATE_KEY, JSON.stringify(pending))
-  } catch {
-    // A atualização ainda pode ocorrer; a confirmação volta a usar a troca do build em memória.
-  }
-  return pending
+  return writePendingUpdate(pending)
+}
+
+export function refinePendingUpdateTarget(target: AppRelease) {
+  const pending = readPendingUpdate()
+  return pending ? writePendingUpdate({ ...pending, target }) : storePendingUpdate(target)
+}
+
+export function recordUpdateReloadAttempt() {
+  const pending = readPendingUpdate()
+  if (!pending) return undefined
+  return writePendingUpdate({ ...pending, reloadAttempts: (pending.reloadAttempts ?? 0) + 1 })
 }
 
 export function isPendingUpdateInstalled(pending: PendingUpdate) {
@@ -62,6 +79,11 @@ export function getInitialUpdateFlow(): UpdateFlow {
   if (!isPendingUpdateInstalled(pending)) return { phase: 'applying', target: pending.target }
   try {
     sessionStorage.removeItem(PENDING_UPDATE_KEY)
+    const url = new URL(window.location.href)
+    if (url.searchParams.has('_tg_update')) {
+      url.searchParams.delete('_tg_update')
+      window.history.replaceState(window.history.state, '', url)
+    }
   } catch {
     // Nada a fazer: o build carregado já é o esperado.
   }

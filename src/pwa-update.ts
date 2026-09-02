@@ -4,13 +4,16 @@ import {
   fetchLatestRelease,
   isPendingUpdateInstalled,
   readPendingUpdate,
+  recordUpdateReloadAttempt,
+  refinePendingUpdateTarget,
   storePendingUpdate,
   type AppRelease,
 } from './app-version'
 
-let updateServiceWorker: (reloadPage?: boolean) => Promise<void> = async () => undefined
 let registration: ServiceWorkerRegistration | undefined
 let watchdog: number | undefined
+let fallbackReload: number | undefined
+let activatedUpdateReady = false
 
 function emit(name: string, detail?: unknown) {
   window.dispatchEvent(new CustomEvent(name, { detail }))
@@ -25,14 +28,46 @@ function startWatchdog() {
   }, 15_000)
 }
 
-async function activateWaitingWorker() {
+async function reloadIntoUpdatedApp() {
+  recordUpdateReloadAttempt()
+  startWatchdog()
+  await new Promise<void>((resolve) => {
+    window.requestAnimationFrame(() => window.requestAnimationFrame(() => resolve()))
+  })
+  const url = new URL(window.location.href)
+  url.searchParams.set('_tg_update', String(Date.now()))
+  window.location.replace(url)
+}
+
+function scheduleFallbackReload() {
+  if (fallbackReload) window.clearTimeout(fallbackReload)
+  fallbackReload = window.setTimeout(() => {
+    const pending = readPendingUpdate()
+    if (pending && (pending.reloadAttempts ?? 0) < 2) void reloadIntoUpdatedApp()
+  }, 1_500)
+}
+
+async function findRegistration() {
+  registration ??= await navigator.serviceWorker.getRegistration(import.meta.env.BASE_URL)
+  return registration
+}
+
+export async function applyAppUpdate(target?: AppRelease) {
+  storePendingUpdate(target)
+  emit('tg:update-applying', { target })
+  if (activatedUpdateReady) {
+    await reloadIntoUpdatedApp()
+    return
+  }
   try {
-    const currentRegistration = registration
-      ?? await navigator.serviceWorker.getRegistration(import.meta.env.BASE_URL)
-    registration = currentRegistration
-    if (!currentRegistration?.waiting) await currentRegistration?.update()
-    await updateServiceWorker(true)
+    const currentRegistration = await findRegistration()
+    if (currentRegistration?.waiting) {
+      currentRegistration.waiting.postMessage({ type: 'SKIP_WAITING' })
+    } else {
+      await currentRegistration?.update()
+    }
     startWatchdog()
+    scheduleFallbackReload()
   } catch {
     emit('tg:update-stalled', {
       message: 'Não conseguimos concluir a atualização. Seus dados continuam guardados neste aparelho.',
@@ -40,22 +75,18 @@ async function activateWaitingWorker() {
   }
 }
 
-export async function applyAppUpdate(target?: AppRelease) {
-  storePendingUpdate(target)
-  emit('tg:update-applying', { target })
-  await activateWaitingWorker()
-}
-
 export function registerAppServiceWorker() {
-  updateServiceWorker = registerSW({
+  registerSW({
     immediate: true,
-    async onNeedRefresh() {
+    async onNeedReload() {
+      activatedUpdateReady = true
       const latest = await fetchLatestRelease()
       const target = latest?.buildId === CURRENT_RELEASE.buildId ? undefined : latest
       const pending = readPendingUpdate()
       if (pending && !isPendingUpdateInstalled(pending)) {
-        if (target && !pending.target) storePendingUpdate(target)
-        await activateWaitingWorker()
+        if (target && !pending.target) refinePendingUpdateTarget(target)
+        emit('tg:update-applying', { target: target ?? pending.target })
+        await reloadIntoUpdatedApp()
         return
       }
       emit('tg:update-ready', { target })
@@ -63,7 +94,10 @@ export function registerAppServiceWorker() {
     onRegisteredSW(_serviceWorkerUrl, currentRegistration) {
       registration = currentRegistration
       const pending = readPendingUpdate()
-      if (pending && !isPendingUpdateInstalled(pending)) void currentRegistration?.update()
+      if (pending && !isPendingUpdateInstalled(pending)) {
+        startWatchdog()
+        void currentRegistration?.update()
+      }
     },
     onRegisterError() {
       if (readPendingUpdate()) {
@@ -73,9 +107,4 @@ export function registerAppServiceWorker() {
       }
     },
   })
-
-  const pending = readPendingUpdate()
-  if (pending && !isPendingUpdateInstalled(pending)) {
-    window.setTimeout(() => void activateWaitingWorker(), 0)
-  }
 }
