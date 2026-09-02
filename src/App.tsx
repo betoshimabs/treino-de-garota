@@ -527,7 +527,7 @@ function TimelinePage({ data, refresh, setNotice }: SharedProps) {
   const choosePhoto = async (event: ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0]
     if (!file) return
-    if (!isSupportedImage(file)) { setNotice('Use uma foto em JPG, PNG, WebP ou HEIC.'); event.target.value = ''; return }
+    if (!isSupportedImage(file)) { setNotice('Use uma foto em JPG, PNG, WebP, AVIF ou HEIC.'); event.target.value = ''; return }
     if (file.size > 20_000_000) { setNotice('Essa foto é grande demais. Escolha uma de até 20 MB.'); event.target.value = ''; return }
     setPhotoBusy(true)
     try {
@@ -537,7 +537,7 @@ function TimelinePage({ data, refresh, setNotice }: SharedProps) {
       setNotice('Foto pronta para guardar.')
     } catch {
       setImageDataUrl(undefined)
-      setNotice('Não conseguimos converter esta foto. Tente exportá-la como JPG, PNG ou WebP.')
+      setNotice('Não conseguimos converter esta foto. Tente exportá-la como JPG, PNG, WebP ou AVIF.')
     } finally {
       setPhotoBusy(false)
       event.target.value = ''
@@ -579,7 +579,7 @@ function TimelinePage({ data, refresh, setNotice }: SharedProps) {
         </div>
       )}
       <FloatingAddButton tone="pink" label="Adicionar à linha" onClick={() => setComposer(true)} />
-      {composer && <div className="sheet-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) setComposer(false) }}><form className="bottom-sheet composer" onSubmit={(event) => void saveEntry(event)}><div className="sheet-handle" /><header><h2>guardar na linha</h2><button type="button" className="icon-button" aria-label="Fechar" onClick={() => setComposer(false)}><X /></button></header>{photoBusy && <div className="photo-processing" role="status">preparando sua foto…</div>}{imageDataUrl && <div className="photo-ready"><img className="composer-preview" src={imageDataUrl} alt="Prévia da foto escolhida" onError={() => { setImageDataUrl(undefined); setNotice('Esta foto não pôde ser exibida. Tente outra imagem.') }} /><button type="button" aria-label="Remover foto escolhida" onClick={() => setImageDataUrl(undefined)}><X size={17} /></button></div>}<textarea value={note} onChange={(event) => setNote(event.target.value)} placeholder="O que você quer lembrar?" aria-label="Anotação" /><div className="composer-actions"><label className="secondary-button file-button"><ImagePlus size={18} /> {imageDataUrl ? 'trocar foto' : 'foto'}<input type="file" accept="image/jpeg,image/png,image/webp,image/heic,image/heif" onChange={(event) => void choosePhoto(event)} /></label><button className="primary-button" disabled={photoBusy || (!note.trim() && !imageDataUrl)}>guardar</button></div><p className="privacy-note"><Info size={15} /> A foto é otimizada e fica neste aparelho.</p></form></div>}
+      {composer && <div className="sheet-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) setComposer(false) }}><form className="bottom-sheet composer" onSubmit={(event) => void saveEntry(event)}><div className="sheet-handle" /><header><h2>guardar na linha</h2><button type="button" className="icon-button" aria-label="Fechar" onClick={() => setComposer(false)}><X /></button></header>{photoBusy && <div className="photo-processing" role="status">preparando sua foto…</div>}{imageDataUrl && <div className="photo-ready"><img className="composer-preview" src={imageDataUrl} alt="Prévia da foto escolhida" onError={() => { setImageDataUrl(undefined); setNotice('Esta foto não pôde ser exibida. Tente outra imagem.') }} /><button type="button" aria-label="Remover foto escolhida" onClick={() => setImageDataUrl(undefined)}><X size={17} /></button></div>}<textarea value={note} onChange={(event) => setNote(event.target.value)} placeholder="O que você quer lembrar?" aria-label="Anotação" /><div className="composer-actions"><label className="secondary-button file-button"><ImagePlus size={18} /> {imageDataUrl ? 'trocar foto' : 'foto'}<input type="file" accept="image/jpeg,image/png,image/webp,image/avif,image/heic,image/heif,image/heic-sequence,image/heif-sequence,.heic,.heif" onChange={(event) => void choosePhoto(event)} /></label><button className="primary-button" disabled={photoBusy || (!note.trim() && !imageDataUrl)}>guardar</button></div><p className="privacy-note"><Info size={15} /> A foto é otimizada e fica neste aparelho.</p></form></div>}
     </div>
   )
 }
@@ -848,11 +848,27 @@ async function compressImage(file: File): Promise<string> {
       image.close()
       return result
     } catch {
-      const image = await ensureImageLoads(source)
-      return await drawCompressedImage(image, image.naturalWidth, image.naturalHeight)
+      try {
+        const image = await ensureImageLoads(source)
+        return await drawCompressedImage(image, image.naturalWidth, image.naturalHeight)
+      } catch {
+        if (!isLikelyHeic(file)) throw new Error('unsupported-image')
+        return await compressHeicImage(file)
+      }
     }
   } finally {
     URL.revokeObjectURL(source)
+  }
+}
+
+async function compressHeicImage(file: File) {
+  const { heicTo, isHeic } = await import('heic-to/csp')
+  if (!await isHeic(file)) throw new Error('invalid-heic')
+  const image = await heicTo({ blob: file, type: 'bitmap' })
+  try {
+    return await drawCompressedImage(image, image.width, image.height)
+  } finally {
+    image.close()
   }
 }
 
@@ -895,9 +911,13 @@ function ensureImageLoads(source: string) {
 }
 
 function isSupportedImage(file: File) {
-  const supportedMime = ['image/jpeg', 'image/png', 'image/webp', 'image/heic', 'image/heif'].includes(file.type.toLocaleLowerCase())
-  const supportedExtension = /\.(jpe?g|png|webp|heic|heif)$/i.test(file.name)
-  return supportedMime || (!file.type && supportedExtension)
+  const supportedMime = ['image/jpeg', 'image/png', 'image/webp', 'image/avif', 'image/heic', 'image/heif', 'image/heic-sequence', 'image/heif-sequence', 'image/x-heic', 'image/x-heif'].includes(file.type.toLocaleLowerCase())
+  const supportedExtension = /\.(jpe?g|png|webp|avif|heic|heif)$/i.test(file.name)
+  return supportedMime || supportedExtension
+}
+
+function isLikelyHeic(file: File) {
+  return ['image/heic', 'image/heif', 'image/heic-sequence', 'image/heif-sequence', 'image/x-heic', 'image/x-heif'].includes(file.type.toLocaleLowerCase()) || /\.(heic|heif)$/i.test(file.name)
 }
 
 function formatSetSummary(set: WorkoutSet, mode: MetricMode, unit: Profile['loadUnit']) {
