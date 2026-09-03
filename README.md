@@ -18,7 +18,7 @@ npm run build
 
 O app é uma PWA local-first com conta obrigatória pelo Firebase Authentication. Os dados do diário ficam no navegador, separados pela conta conectada, e podem ser exportados em **Eu → Seus dados**.
 
-Publicado em [brabita-6e0ea.web.app](https://brabita-6e0ea.web.app/).
+Publicado em [app-brabita.web.app](https://app-brabita.web.app/).
 
 ## Deploy
 

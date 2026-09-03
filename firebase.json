@@ -1,5 +1,6 @@
 {
   "hosting": {
+    "site": "app-brabita",
     "public": "dist",
     "ignore": [
       "firebase.json",
