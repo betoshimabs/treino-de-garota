@@ -5,6 +5,8 @@ import { VitePWA } from 'vite-plugin-pwa'
 declare const process: { env: Record<string, string | undefined> }
 
 const builtAt = new Date().toISOString()
+const configuredBase = process.env.VITE_BASE_PATH ?? '/'
+const basePath = configuredBase.endsWith('/') ? configuredBase : `${configuredBase}/`
 const packageVersion = process.env.npm_package_version ?? '0.1.0'
 const [major = '0', minor = '1'] = packageVersion.split('.')
 const runNumber = process.env.GITHUB_RUN_NUMBER
@@ -19,7 +21,7 @@ const appBuildId = runNumber
 const release = { version: appVersion, buildId: appBuildId, builtAt }
 
 export default defineConfig({
-  base: '/treino-de-garota/',
+  base: basePath,
   define: {
     __APP_VERSION__: JSON.stringify(release.version),
     __APP_BUILD_ID__: JSON.stringify(release.buildId),
@@ -50,13 +52,13 @@ export default defineConfig({
         name: 'Brabita',
         short_name: 'Brabita',
         description: 'Seu treino, do jeito que aconteceu.',
-        id: '/treino-de-garota/',
+        id: basePath,
         theme_color: '#f6f1e3',
         background_color: '#f6f1e3',
         display: 'standalone',
         orientation: 'portrait-primary',
-        start_url: '/treino-de-garota/#/',
-        scope: '/treino-de-garota/',
+        start_url: `${basePath}#/`,
+        scope: basePath,
         icons: [
           {
             src: 'brabita-icon-192.png',

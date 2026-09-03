@@ -17,9 +17,8 @@ class TreinoDatabase extends Dexie {
   customTemplates!: EntityTable<WorkoutTemplate, 'id'>
   profiles!: EntityTable<Profile, 'id'>
 
-  constructor() {
-    // Mantido para preservar os dados locais criados antes da marca Brabita.
-    super('treino-de-garota')
+  constructor(name: string) {
+    super(name)
     this.version(1).stores({
       workouts: 'id, status, startedAt, endedAt',
       timeline: 'id, kind, occurredAt, isMilestone, sourceId',
@@ -52,7 +51,86 @@ class TreinoDatabase extends Dexie {
   }
 }
 
-export const db = new TreinoDatabase()
+const LEGACY_DATABASE_NAME = 'treino-de-garota'
+const USER_DATABASE_PREFIX = 'brabita-user-'
+const LEGACY_MIGRATION_KEY = 'brabita-legacy-data-migration'
+
+let activeUserId: string | undefined
+export let db = new TreinoDatabase('brabita-not-ready')
+
+function databaseNameForUser(userId: string) {
+  return `${USER_DATABASE_PREFIX}${userId.replace(/[^a-zA-Z0-9_-]/g, '_')}`
+}
+
+export function useDatabaseForUser(userId: string) {
+  if (activeUserId === userId) return
+  db.close()
+  db = new TreinoDatabase(databaseNameForUser(userId))
+  activeUserId = userId
+}
+
+async function databaseHasContent(database: TreinoDatabase) {
+  const counts = await Promise.all([
+    database.workouts.count(),
+    database.timeline.count(),
+    database.favorites.count(),
+    database.customExercises.count(),
+    database.customTemplates.count(),
+    database.profiles.count(),
+  ])
+  return counts.some((count) => count > 0)
+}
+
+export async function shouldOfferLegacyDataImport() {
+  if (localStorage.getItem(LEGACY_MIGRATION_KEY)) return false
+  if (await databaseHasContent(db)) return false
+  if (!(await Dexie.exists(LEGACY_DATABASE_NAME))) return false
+  const legacy = new TreinoDatabase(LEGACY_DATABASE_NAME)
+  try {
+    return await databaseHasContent(legacy)
+  } finally {
+    legacy.close()
+  }
+}
+
+export async function importLegacyDataForCurrentUser() {
+  const legacy = new TreinoDatabase(LEGACY_DATABASE_NAME)
+  try {
+    const [workouts, timeline, favorites, customExercises, customTemplates, profiles] = await Promise.all([
+      legacy.workouts.toArray(),
+      legacy.timeline.toArray(),
+      legacy.favorites.toArray(),
+      legacy.customExercises.toArray(),
+      legacy.customTemplates.toArray(),
+      legacy.profiles.toArray(),
+    ])
+    await db.transaction('rw', [db.workouts, db.timeline, db.favorites, db.customExercises, db.customTemplates, db.profiles], async () => {
+      await Promise.all([
+        db.workouts.bulkPut(workouts),
+        db.timeline.bulkPut(timeline),
+        db.favorites.bulkPut(favorites),
+        db.customExercises.bulkPut(customExercises),
+        db.customTemplates.bulkPut(customTemplates),
+        db.profiles.bulkPut(profiles),
+      ])
+    })
+    localStorage.setItem(LEGACY_MIGRATION_KEY, `claimed:${activeUserId ?? 'unknown'}`)
+  } finally {
+    legacy.close()
+  }
+}
+
+export function keepLegacyDataSeparate() {
+  localStorage.setItem(LEGACY_MIGRATION_KEY, 'kept-separate')
+}
+
+export async function deleteDatabaseForUser(userId: string) {
+  if (activeUserId === userId) {
+    db.close()
+    activeUserId = undefined
+  }
+  await Dexie.delete(databaseNameForUser(userId))
+}
 
 export async function loadSnapshot(): Promise<AppSnapshot> {
   const [workouts, timeline, favoriteRows, customExercises, customTemplates, storedProfile] = await Promise.all([

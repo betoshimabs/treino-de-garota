@@ -12,6 +12,7 @@ import {
   Home,
   ImagePlus,
   Info,
+  LogOut,
   MoreHorizontal,
   NotebookPen,
   PencilLine,
@@ -19,6 +20,7 @@ import {
   Plus,
   RotateCcw,
   Search,
+  ShieldCheck,
   SlidersHorizontal,
   Star,
   Trash2,
@@ -34,6 +36,7 @@ import { systemTemplates } from './data/templates'
 import { calculateBmi, formatLocalizedNumber, isSetValid, kgToLb, lbToKg, parseLocalizedNumber } from './domain'
 import { ExerciseVisual } from './components/ExerciseVisual'
 import { applyAppUpdate } from './pwa-update'
+import { getAuthErrorMessage, useAuth } from './auth'
 import { exerciseProgress, thisMonthCount, totalCompletedSets, workoutDurationMinutes } from './stats'
 import { MAX_TIMELINE_PHOTOS, timelineImages, timelineMedia } from './timeline'
 import type { ActivityCategory, AppSnapshot, Exercise, Feeling, MetricMode, Profile, TimelineEntry, Workout, WorkoutItem, WorkoutSet, WorkoutTemplate } from './types'
@@ -230,7 +233,7 @@ function Onboarding({ profile, onDone }: { profile: Profile; onDone: (profile: P
         setBusy(true)
         await onDone({ ...profile, loadUnit: unit, onboarded: true })
       }}>começar meu diário <ChevronRight size={19} /></button>
-      <p className="privacy-note"><Info size={16} /> Seus dados ficam somente neste aparelho.</p>
+      <p className="privacy-note"><Info size={16} /> Seu diário fica neste aparelho e é separado pela sua conta.</p>
     </main>
   )
 }
@@ -808,9 +811,11 @@ function EvolutionPage({ data, allExercises }: { data: AppSnapshot; allExercises
 }
 
 function ProfilePage({ data, refresh, setNotice }: SharedProps) {
+  const { user, signOutAccount, deleteAccount } = useAuth()
   const [profile, setLocalProfile] = useState(data.profile)
   const [pendingBackup, setPendingBackup] = useState<{ data: AppSnapshot }>()
   const [eraseConfirm, setEraseConfirm] = useState(false)
+  const [accountDeleteConfirm, setAccountDeleteConfirm] = useState(false)
   const [dataActionBusy, setDataActionBusy] = useState(false)
   const fileRef = useRef<HTMLInputElement>(null)
   const persistProfile = async (next: Profile) => { setLocalProfile(next); await saveProfile(next); await refresh() }
@@ -890,8 +895,14 @@ function ProfilePage({ data, refresh, setNotice }: SharedProps) {
           <label className="field"><span>gravidez</span><select value={profile.pregnancyStatus ?? ''} onChange={(event) => void persistProfile({ ...profile, pregnancyStatus: event.target.value ? event.target.value as Profile['pregnancyStatus'] : undefined })}><option value="">Prefiro não informar</option><option value="pregnant">Estou grávida</option><option value="not-pregnant">Não estou grávida</option></select></label>
         </div>
       </details>
+      <section className="account-section">
+        <p className="eyebrow">sua conta</p><h2>acesso ao diário</h2>
+        <div className="account-summary"><ShieldCheck size={21} /><span><strong>{user?.displayName || profile.nickname || 'Sua conta Brabita'}</strong><small>{user?.email ?? 'Conta conectada'} · e-mail confirmado</small></span></div>
+        <button className="data-action" onClick={() => void signOutAccount()}><LogOut /><span><strong>sair desta conta</strong><small>seus dados permanecem guardados neste aparelho</small></span><ChevronRight /></button>
+        <button className="danger-action" onClick={() => setAccountDeleteConfirm(true)}><Trash2 size={18} /> excluir minha conta</button>
+      </section>
       <section className="data-section">
-        <p className="eyebrow">seus dados</p><h2>ficam neste aparelho</h2><p>Faça um backup para levar sua história com você ou recuperar depois.</p>
+        <p className="eyebrow">seus dados</p><h2>ficam neste aparelho</h2><p>Seu diário é separado pela conta conectada. Faça um backup para levar sua história com você ou recuperar depois.</p>
         <button className="data-action" onClick={() => void exportData()}><Download /><span><strong>baixar backup</strong><small>treinos, notas, fotos, modelos e preferências</small></span><ChevronRight /></button>
         <button className="data-action" onClick={() => fileRef.current?.click()}><Upload /><span><strong>restaurar backup</strong><small>substitui os dados deste aparelho</small></span><ChevronRight /></button>
         <input ref={fileRef} hidden type="file" accept="application/json" onChange={(event) => void importData(event)} />
@@ -901,6 +912,14 @@ function ProfilePage({ data, refresh, setNotice }: SharedProps) {
     </div>
     <ConfirmDialog open={Boolean(pendingBackup)} title="restaurar este backup?" confirmLabel="restaurar backup" onClose={() => setPendingBackup(undefined)} onConfirm={() => void restoreBackup()} busy={dataActionBusy}><p>Os dados atuais deste aparelho serão substituídos pelo conteúdo do arquivo.</p></ConfirmDialog>
     <ConfirmDialog open={eraseConfirm} title="apagar todos os dados?" confirmLabel="apagar tudo" tone="danger" onClose={() => setEraseConfirm(false)} onConfirm={() => void erase()} busy={dataActionBusy}><p>Treinos, fotos, notas, modelos e preferências serão removidos deste aparelho. Esta ação não pode ser desfeita.</p></ConfirmDialog>
+    <ConfirmDialog open={accountDeleteConfirm} title="excluir sua conta?" confirmLabel="excluir conta" tone="danger" onClose={() => setAccountDeleteConfirm(false)} onConfirm={() => {
+      setDataActionBusy(true)
+      void deleteAccount().catch((error) => {
+        setDataActionBusy(false)
+        setAccountDeleteConfirm(false)
+        setNotice(getAuthErrorMessage(error))
+      })
+    }} busy={dataActionBusy}><p>A conta e o diário dela neste aparelho serão excluídos. Esta ação não pode ser desfeita.</p></ConfirmDialog>
   </>
 }
 

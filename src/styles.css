@@ -81,6 +81,49 @@ h2 { font-size: 1.35rem; line-height: 1.05; }
 .segmented.small button { min-width: 0; min-height: 38px; }
 .privacy-note { color: var(--muted); font-size: .78rem; line-height: 1.4; display: flex; justify-content: center; align-items: center; gap: 7px; margin: 18px auto 0; }
 
+.auth-shell { min-height: 100dvh; max-width: 520px; margin: 0 auto; padding: max(26px, env(safe-area-inset-top)) 22px max(28px, env(safe-area-inset-bottom)); display: flex; align-items: center; }
+.auth-card { width: 100%; }
+.auth-brand { display: flex; align-items: center; gap: 11px; margin-bottom: clamp(34px, 8vh, 68px); }
+.auth-brand img { width: 54px; height: 54px; border-radius: 17px; object-fit: cover; box-shadow: 0 4px 0 rgba(23, 21, 18, .1); }
+.auth-brand strong { font-family: 'Gabarito Variable'; font-size: 1.16rem; }
+.auth-tabs { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; padding: 4px; margin-bottom: 28px; border-radius: 15px; background: rgba(255, 253, 248, .68); border: 1px solid var(--line); }
+.auth-tabs button { min-height: 44px; border-radius: 11px; background: transparent; color: var(--muted); font-weight: 800; }
+.auth-tabs button.selected { background: var(--pink-paper); color: var(--ink); }
+.auth-heading { margin-bottom: 23px; }
+.auth-heading h1, .verification-card h1, .migration-card h1 { font-size: clamp(2rem, 9vw, 2.65rem); line-height: .96; margin-bottom: 13px; }
+.auth-heading > p:last-child, .verification-card > p:not(.eyebrow), .migration-card > p:not(.eyebrow) { color: var(--muted); line-height: 1.48; margin-bottom: 0; }
+.google-button { width: 100%; min-height: 50px; display: flex; align-items: center; justify-content: center; gap: 10px; border: 1px solid var(--line); border-radius: 14px; background: var(--white); font-weight: 800; }
+.google-button:disabled { opacity: .5; }
+.auth-divider { height: 45px; display: flex; align-items: center; justify-content: center; color: var(--muted); font-size: .7rem; }
+.auth-divider::before, .auth-divider::after { content: ''; height: 1px; flex: 1; background: var(--line); }
+.auth-divider span { padding: 0 11px; }
+.auth-form { display: grid; gap: 15px; }
+.auth-form > label { display: grid; gap: 6px; color: var(--muted); font-size: .74rem; font-weight: 750; }
+.auth-form input { width: 100%; min-height: 50px; padding: 0 13px; border: 1px solid var(--line); border-radius: 12px; background: var(--white); font-size: 1rem; }
+.password-field { position: relative; display: block; }
+.password-field input { padding-right: 52px; }
+.password-field button { position: absolute; top: 3px; right: 3px; width: 44px; height: 44px; display: grid; place-items: center; border-radius: 10px; background: transparent; color: var(--muted); }
+.auth-feedback { padding: 11px 12px; margin: 0; border-radius: 12px; font-size: .78rem; line-height: 1.4; }
+.auth-feedback.error { color: #7c263d; background: #fae4e8; }
+.auth-feedback.success { display: flex; align-items: center; gap: 7px; color: #285e50; background: rgba(168, 218, 220, .43); }
+.auth-text-button, .auth-back { min-height: 44px; padding: 0; background: transparent; color: #615c54; text-decoration: underline; text-decoration-color: var(--pink); text-underline-offset: 4px; }
+.auth-text-button { display: block; margin: 10px auto 0; }
+.auth-text-button.muted { margin-top: 0; color: var(--muted); text-decoration-color: var(--line); }
+.origin-migration-note { margin-top: 25px; padding-top: 16px; border-top: 1px solid var(--line); color: var(--muted); font-size: .74rem; line-height: 1.45; }
+.origin-migration-note summary { min-height: 36px; display: flex; align-items: center; cursor: pointer; font-weight: 800; }
+.origin-migration-note p { margin: 5px 0 10px; }
+.origin-migration-note a { color: var(--ink); text-decoration: underline; text-decoration-color: var(--pink); text-underline-offset: 4px; font-weight: 800; }
+.auth-back { display: flex; align-items: center; gap: 7px; margin-bottom: 24px; text-decoration: none; }
+.verification-card, .migration-card { text-align: left; }
+.verification-card .auth-brand, .migration-card .auth-brand { margin-bottom: 44px; }
+.mail-orbit { width: 58px; height: 58px; display: grid; place-items: center; margin-bottom: 25px; border-radius: 50%; background: rgba(168, 218, 220, .58); border: 1px solid rgba(244, 91, 154, .45); }
+.verification-card .primary-button, .migration-card .primary-button { margin-top: 24px; }
+.auth-loading { min-height: 100dvh; display: grid; place-content: center; justify-items: center; gap: 9px; text-align: center; }
+.auth-loading img { width: 70px; height: 70px; border-radius: 21px; object-fit: cover; box-shadow: 0 5px 0 rgba(23, 21, 18, .1); }
+.auth-loading strong { font-family: 'Gabarito Variable'; font-size: 1.15rem; }
+.auth-loading p { color: var(--muted); font-size: .8rem; }
+.auth-spinner { width: 25px; height: 25px; margin: 13px 0 2px; border: 2.5px solid rgba(23, 21, 18, .13); border-top-color: var(--pink); border-radius: 50%; animation: update-spin .8s linear infinite; }
+
 .hero-action { background: var(--white); border-radius: 25px 21px 27px 22px; padding: 19px 16px; display: grid; grid-template-columns: auto 1fr auto; align-items: center; gap: 13px; box-shadow: var(--soft-shadow); }
 .hero-action p { color: var(--muted); font-size: .77rem; margin-bottom: 3px; }
 .hero-action h2 { margin: 0; font-size: 1.45rem; }
@@ -390,8 +433,12 @@ h2 { font-size: 1.35rem; line-height: 1.05; }
 .avatar-soft { width: 64px; height: 64px; border-radius: 24px 20px 26px 21px; background: var(--pink-paper); display: grid; place-items: center; }
 .profile-intro label span { display: block; color: var(--muted); font-size: .73rem; margin-bottom: 4px; }
 .profile-intro input { border: 0; border-bottom: 1px solid var(--line); background: transparent; width: 100%; min-height: 38px; font-family: 'Gabarito Variable'; font-size: 1.2rem; font-weight: 650; }
-.settings-section, .data-section { padding-top: 25px; border-top: 1px solid var(--line); margin-top: 20px; }
-.settings-section > h2, .data-section > h2 { font-size: 1.45rem; }
+.settings-section, .account-section, .data-section { padding-top: 25px; border-top: 1px solid var(--line); margin-top: 20px; }
+.settings-section > h2, .account-section > h2, .data-section > h2 { font-size: 1.45rem; }
+.account-summary { min-height: 72px; display: grid; grid-template-columns: 34px 1fr; align-items: center; gap: 8px; border-top: 1px solid var(--line); }
+.account-summary svg { color: #286b5c; }
+.account-summary strong, .account-summary small { display: block; }
+.account-summary small { color: var(--muted); margin-top: 3px; font-size: .72rem; overflow-wrap: anywhere; }
 .setting-row { min-height: 76px; display: flex; align-items: center; justify-content: space-between; gap: 14px; border-top: 1px solid var(--line); }
 .setting-row strong, .setting-row small { display: block; }
 .setting-row small { color: var(--muted); font-size: .72rem; margin-top: 3px; }
