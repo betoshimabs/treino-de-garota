@@ -13,43 +13,14 @@ const regularIcons = [
   { size: 512, name: 'brabita-icon-512.png' },
 ]
 
-const cornerPixel = await sharp(source)
-  .ensureAlpha()
-  .extract({ left: 0, top: 0, width: 1, height: 1 })
-  .raw()
-  .toBuffer()
-
-const background = {
-  r: cornerPixel[0],
-  g: cornerPixel[1],
-  b: cornerPixel[2],
-  alpha: cornerPixel[3] / 255,
-}
-
 await Promise.all(regularIcons.map(({ size, name }) => sharp(source)
   .resize(size, size, { fit: 'cover' })
   .png(pngOptions)
   .toFile(outputPath(name))))
 
 const maskableSize = 512
-const safeArtworkSize = Math.round(maskableSize * 0.76)
-const circularMask = Buffer.from(`<svg width="${safeArtworkSize}" height="${safeArtworkSize}" xmlns="http://www.w3.org/2000/svg"><circle cx="50%" cy="50%" r="50%" fill="white"/></svg>`)
-const safeArtwork = await sharp(source)
-  .resize(safeArtworkSize, safeArtworkSize, { fit: 'contain' })
-  .ensureAlpha()
-  .composite([{ input: circularMask, blend: 'dest-in' }])
-  .png()
-  .toBuffer()
-
-await sharp({
-  create: {
-    width: maskableSize,
-    height: maskableSize,
-    channels: 4,
-    background,
-  },
-})
-  .composite([{ input: safeArtwork, gravity: 'centre' }])
+await sharp(source)
+  .resize(maskableSize, maskableSize, { fit: 'cover' })
   .png(pngOptions)
   .toFile(outputPath('brabita-icon-512-maskable.png'))
 
