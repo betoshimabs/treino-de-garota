@@ -65,6 +65,8 @@ export interface TimelineEntry {
   occurredAt: string
   title: string
   text?: string
+  imageDataUrls?: string[]
+  /** Mantido para ler registros e backups criados antes da galeria múltipla. */
   imageDataUrl?: string
   isMilestone: boolean
   sourceId?: string

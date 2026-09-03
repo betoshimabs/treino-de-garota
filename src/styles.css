@@ -258,21 +258,54 @@ h2 { font-size: 1.35rem; line-height: 1.05; }
 .timeline-date strong { font-family: 'Gabarito Variable'; font-size: .82rem; }
 .timeline-date span { color: var(--muted); font-size: .7rem; margin-top: 3px; }
 .timeline-content { min-width: 0; padding-top: 3px; }
-.timeline-content h2 { margin-bottom: 6px; font-size: 1.14rem; }
-.timeline-content > p:not(.milestone-label) { color: #5f5a52; font-size: .86rem; line-height: 1.45; white-space: pre-wrap; }
-.timeline-content img { border-radius: 19px 16px 21px 17px; width: 100%; max-height: 390px; object-fit: cover; margin-top: 12px; box-shadow: var(--soft-shadow); }
-.photo-unavailable { min-height: 92px; margin-top: 12px; display: flex; align-items: center; justify-content: center; gap: 8px; border-radius: 17px; background: rgba(244, 213, 167, .35); color: var(--muted); font-size: .78rem; }
+.timeline-open { width: 100%; margin: -4px; padding: 4px; border-radius: 12px; background: transparent; text-align: left; }
+.timeline-open h2 { margin-bottom: 6px; font-size: 1.14rem; }
+.timeline-open > p { display: -webkit-box; overflow: hidden; color: #5f5a52; font-size: .86rem; line-height: 1.45; white-space: pre-wrap; -webkit-box-orient: vertical; -webkit-line-clamp: 3; }
+.open-detail-hint { min-height: 32px; display: inline-flex; align-items: center; gap: 2px; color: var(--muted); font-size: .7rem; font-weight: 750; }
+.timeline-collage { display: grid; gap: 4px; overflow: hidden; margin-top: 12px; border-radius: 19px 16px 21px 17px; background: rgba(244, 213, 167, .25); box-shadow: var(--soft-shadow); }
+.timeline-photo-tile { min-width: 0; min-height: 0; display: block; overflow: hidden; background: rgba(244, 213, 167, .3); }
+.timeline-photo-tile > img { width: 100%; height: 100%; object-fit: cover; }
+.timeline-collage.summary.count-1 { aspect-ratio: 4 / 3; max-height: 330px; }
+.timeline-collage.summary:not(.count-1) { height: 190px; grid-auto-flow: column; grid-auto-columns: 82%; overflow-x: auto; overscroll-behavior-inline: contain; scroll-snap-type: inline mandatory; scrollbar-width: none; }
+.timeline-collage.summary:not(.count-1) .timeline-photo-tile { scroll-snap-align: start; }
+.timeline-collage::-webkit-scrollbar, .composer-previews::-webkit-scrollbar { display: none; }
+.photo-unavailable { width: 100%; height: 100%; min-height: 76px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 6px; background: rgba(244, 213, 167, .35); color: var(--muted); font-size: .66rem; text-align: center; }
 .milestone-label { display: inline-flex; gap: 5px; align-items: center; color: #9d2a5e; font-size: .7rem; font-weight: 800; margin-bottom: 6px; }
 .entry-actions { display: flex; gap: 13px; margin-top: 10px; }
 .entry-actions button { min-height: 38px; background: transparent; color: var(--muted); display: flex; align-items: center; gap: 5px; font-size: .74rem; padding: 0; }
+.timeline-gallery { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 5px; margin-top: -7px; padding-bottom: 54px; }
+.timeline-gallery > button { min-width: 0; aspect-ratio: 1; overflow: hidden; padding: 0; border-radius: 12px 10px 13px 11px; background: rgba(244, 213, 167, .3); }
+.timeline-gallery > button:nth-child(6n+2), .timeline-gallery > button:nth-child(6n+5) { border-radius: 10px 13px 11px 12px; }
+.timeline-gallery .timeline-photo-tile { width: 100%; height: 100%; }
+.detail-dialog-backdrop { position: fixed; inset: 0; z-index: 75; display: flex; align-items: flex-end; justify-content: center; overflow: hidden; padding-top: max(18px, env(safe-area-inset-top)); background: rgba(23, 21, 18, .42); }
+.timeline-detail-dialog { width: min(100%, 680px); max-height: 92dvh; overflow: auto; overscroll-behavior: contain; padding: 22px 20px calc(30px + env(safe-area-inset-bottom)); border-radius: 27px 27px 0 0; background: var(--white); box-shadow: 0 -12px 34px rgba(23, 21, 18, .16); }
+.timeline-detail-dialog > header { position: sticky; z-index: 2; top: -22px; display: grid; grid-template-columns: 1fr 44px; gap: 12px; align-items: start; margin: -22px -20px 18px; padding: 22px 14px 13px 20px; background: rgba(255, 253, 248, .96); border-bottom: 1px solid var(--line); }
+.timeline-detail-dialog header h2 { margin: 0; font-size: 1.65rem; }
+.timeline-detail-dialog header .eyebrow { margin-bottom: 5px; line-height: 1.4; }
+.timeline-detail-text { color: #514d47; line-height: 1.55; white-space: pre-wrap; }
+.timeline-collage.detail { height: min(62dvh, 560px); grid-auto-flow: column; grid-auto-columns: min(86%, 520px); gap: 10px; overflow-x: auto; overscroll-behavior-inline: contain; scroll-snap-type: inline mandatory; scrollbar-width: none; background: transparent; box-shadow: none; }
+.timeline-collage.detail.count-1 { grid-auto-columns: 100%; overflow: hidden; }
+.timeline-collage.detail .timeline-photo-tile { min-height: 180px; border-radius: 18px 15px 20px 16px; scroll-snap-align: start; background: var(--paper); }
+.timeline-collage.detail img { object-fit: contain; }
+.timeline-workout-detail { margin-top: 20px; border-top: 1px solid var(--line); }
+.timeline-workout-summary { margin: 16px 0 2px; color: var(--muted); font-size: .82rem; }
+.timeline-workout-detail section { padding: 16px 0; border-bottom: 1px solid var(--line); }
+.timeline-workout-detail h3 { margin: 0 0 6px; font-family: 'Gabarito Variable'; font-size: 1.05rem; }
+.timeline-workout-detail section p, .timeline-workout-detail section small { margin: 0; color: var(--muted); font-size: .78rem; line-height: 1.45; }
 .composer textarea { width: 100%; min-height: 140px; resize: vertical; border: 0; background: var(--white); border-radius: 17px; padding: 15px; margin: 10px 0 14px; outline: 0; line-height: 1.5; }
 .composer textarea:focus { box-shadow: 0 0 0 3px var(--ink); }
-.composer-preview { width: 100%; max-height: 300px; object-fit: cover; border-radius: 18px; margin: 10px 0; }
+.composer-count { margin: 3px 0 0; color: var(--muted); font-size: .7rem; }
+.composer-previews { display: grid; grid-auto-flow: column; grid-auto-columns: 80%; gap: 7px; overflow-x: auto; overscroll-behavior-inline: contain; scroll-snap-type: inline mandatory; scrollbar-width: none; margin: 12px 0 4px; }
+.composer-previews.count-1 { grid-auto-columns: 100%; overflow: hidden; }
+.composer-previews .photo-ready { scroll-snap-align: start; }
+.composer-preview { width: 100%; height: 190px; object-fit: cover; border-radius: 16px 13px 17px 14px; }
+.composer-previews.count-1 .composer-preview { height: min(300px, 38dvh); }
 .photo-processing { min-height: 90px; display: grid; place-items: center; margin: 10px 0; border-radius: 17px; background: rgba(168, 218, 220, .35); color: var(--muted); font-size: .82rem; }
 .photo-ready { position: relative; }
-.photo-ready button { position: absolute; top: 18px; right: 8px; width: 38px; height: 38px; display: grid; place-items: center; border-radius: 50%; background: var(--white); box-shadow: var(--soft-shadow); }
+.photo-ready button { position: absolute; top: 7px; right: 7px; width: 38px; height: 38px; display: grid; place-items: center; border-radius: 50%; background: var(--white); box-shadow: var(--soft-shadow); }
 .composer-actions { display: flex; justify-content: space-between; gap: 10px; }
 .file-button { cursor: pointer; }
+.file-button.disabled { opacity: .45; cursor: default; }
 .file-button input { display: none; }
 
 .result-count { color: var(--muted); font-size: .76rem; margin: 10px 2px 3px; }
@@ -391,6 +424,9 @@ h2 { font-size: 1.35rem; line-height: 1.05; }
   body { background: #e9e3d7; }
   .app-shell { background: var(--paper); box-shadow: 0 0 50px rgba(23, 21, 18, .08); }
   .page { padding-inline: 34px; }
+  .detail-dialog-backdrop { align-items: center; padding: 28px; }
+  .timeline-detail-dialog { max-width: 620px; border-radius: 27px 24px 29px 25px; padding-inline: 28px; padding-bottom: 28px; }
+  .timeline-detail-dialog > header { margin-inline: -28px; padding-inline: 28px 20px; }
 }
 
 @media (max-width: 355px) {
@@ -407,6 +443,8 @@ h2 { font-size: 1.35rem; line-height: 1.05; }
   .install-action { grid-column: 2; justify-self: start; }
   .install-later { grid-column: 2; }
   .timeline-entry { grid-template-columns: 38px 50px 1fr; gap: 8px; }
+  .timeline-collage.summary:not(.count-1) { height: 160px; }
+  .composer-actions { align-items: stretch; flex-direction: column; }
 }
 
 @media (max-width: 699px) {

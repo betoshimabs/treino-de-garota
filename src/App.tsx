@@ -35,6 +35,7 @@ import { calculateBmi, formatLocalizedNumber, isSetValid, kgToLb, lbToKg, parseL
 import { ExerciseVisual } from './components/ExerciseVisual'
 import { applyAppUpdate } from './pwa-update'
 import { exerciseProgress, thisMonthCount, totalCompletedSets, workoutDurationMinutes } from './stats'
+import { MAX_TIMELINE_PHOTOS, timelineImages, timelineMedia } from './timeline'
 import type { ActivityCategory, AppSnapshot, Exercise, Feeling, MetricMode, Profile, TimelineEntry, Workout, WorkoutItem, WorkoutSet, WorkoutTemplate } from './types'
 
 const makeId = () => crypto.randomUUID()
@@ -541,10 +542,14 @@ function formatTimer(value: number) {
 function TimelinePage({ data, refresh, setNotice }: SharedProps) {
   const [composer, setComposer] = useState(false)
   const [note, setNote] = useState('')
-  const [imageDataUrl, setImageDataUrl] = useState<string>()
+  const [imageDataUrls, setImageDataUrls] = useState<string[]>([])
   const [photoBusy, setPhotoBusy] = useState(false)
-  const [filter, setFilter] = useState<'all' | 'milestones'>('all')
-  const visible = data.timeline.filter((entry) => filter === 'all' || entry.isMilestone)
+  const [photoProgress, setPhotoProgress] = useState({ current: 0, total: 0 })
+  const [filter, setFilter] = useState<'all' | 'milestones' | 'media'>('all')
+  const [selectedEntryId, setSelectedEntryId] = useState<string>()
+  const visible = data.timeline.filter((entry) => filter === 'all' || (filter === 'milestones' && entry.isMilestone))
+  const media = useMemo(() => timelineMedia(data.timeline), [data.timeline])
+  const selectedEntry = data.timeline.find((entry) => entry.id === selectedEntryId)
 
   useEffect(() => {
     if (!composer) return
@@ -555,44 +560,62 @@ function TimelinePage({ data, refresh, setNotice }: SharedProps) {
   }, [composer])
 
   const choosePhoto = async (event: ChangeEvent<HTMLInputElement>) => {
-    const file = event.target.files?.[0]
-    if (!file) return
-    if (!isSupportedImage(file)) { setNotice('Use uma foto em JPG, PNG, WebP, AVIF ou HEIC.'); event.target.value = ''; return }
-    if (file.size > 20_000_000) { setNotice('Essa foto é grande demais. Escolha uma de até 20 MB.'); event.target.value = ''; return }
+    const selectedFiles = Array.from(event.target.files ?? [])
+    const remaining = MAX_TIMELINE_PHOTOS - imageDataUrls.length
+    event.target.value = ''
+    if (selectedFiles.length === 0) return
+    if (remaining <= 0) { setNotice('Você já escolheu o limite de 5 fotos.'); return }
+
+    const supported = selectedFiles.filter((file) => isSupportedImage(file) && file.size <= 20_000_000)
+    const files = supported.slice(0, remaining)
+    if (files.length === 0) { setNotice('Use fotos de até 20 MB em JPG, PNG, WebP, AVIF ou HEIC.'); return }
+
     setPhotoBusy(true)
+    setPhotoProgress({ current: 0, total: files.length })
+    const processed: string[] = []
+    let failed = selectedFiles.length - supported.length
     try {
-      const processed = await compressImage(file)
-      await ensureImageLoads(processed)
-      setImageDataUrl(processed)
-      setNotice('Foto pronta para guardar.')
-    } catch {
-      setImageDataUrl(undefined)
-      setNotice('Não conseguimos converter esta foto. Tente exportá-la como JPG, PNG, WebP ou AVIF.')
+      for (const [index, file] of files.entries()) {
+        setPhotoProgress({ current: index + 1, total: files.length })
+        try {
+          const image = await compressImage(file)
+          await ensureImageLoads(image)
+          processed.push(image)
+        } catch {
+          failed += 1
+        }
+      }
+      if (processed.length > 0) setImageDataUrls((current) => [...current, ...processed].slice(0, MAX_TIMELINE_PHOTOS))
+      const overLimit = supported.length > remaining
+      if (failed > 0) setNotice(`${processed.length} ${processed.length === 1 ? 'foto ficou pronta' : 'fotos ficaram prontas'}; ${failed} não ${failed === 1 ? 'pôde' : 'puderam'} ser convertida${failed === 1 ? '' : 's'}.`)
+      else if (overLimit) setNotice(`Fotos prontas. Cada registro pode ter até ${MAX_TIMELINE_PHOTOS}.`)
+      else setNotice(processed.length === 1 ? 'Foto pronta para guardar.' : `${processed.length} fotos prontas para guardar.`)
     } finally {
       setPhotoBusy(false)
-      event.target.value = ''
+      setPhotoProgress({ current: 0, total: 0 })
     }
   }
   const saveEntry = async (event: FormEvent) => {
     event.preventDefault()
-    if (!note.trim() && !imageDataUrl) return
-    const entry: TimelineEntry = { id: makeId(), kind: imageDataUrl ? 'photo' : 'note', occurredAt: new Date().toISOString(), title: imageDataUrl ? 'Um registro de hoje' : 'Nota de hoje', text: note.trim(), imageDataUrl, isMilestone: false }
+    if (!note.trim() && imageDataUrls.length === 0) return
+    const entry: TimelineEntry = { id: makeId(), kind: imageDataUrls.length > 0 ? 'photo' : 'note', occurredAt: new Date().toISOString(), title: imageDataUrls.length > 0 ? 'Um registro de hoje' : 'Nota de hoje', text: note.trim(), imageDataUrls, isMilestone: false }
     try {
       await db.timeline.put(entry)
       const saved = await db.timeline.get(entry.id)
-      if (!saved || (imageDataUrl && !saved.imageDataUrl)) {
+      const savedImages = saved ? timelineImages(saved) : []
+      if (!saved || savedImages.length !== imageDataUrls.length) {
         await db.timeline.delete(entry.id)
         throw new Error('photo-not-persisted')
       }
-      if (saved.imageDataUrl) {
+      for (const image of savedImages) {
         try {
-          await ensureImageLoads(saved.imageDataUrl)
+          await ensureImageLoads(image)
         } catch {
           await db.timeline.delete(entry.id)
           throw new Error('photo-invalid-after-save')
         }
       }
-      await refresh(); setNote(''); setImageDataUrl(undefined); setComposer(false); setNotice('Guardado na sua linha.')
+      await refresh(); setNote(''); setImageDataUrls([]); setComposer(false); setNotice('Guardado na sua linha.')
     } catch (error) {
       const quotaReached = error instanceof DOMException && error.name === 'QuotaExceededError'
       setNotice(quotaReached ? 'Não há espaço suficiente neste aparelho para guardar a foto.' : 'Não conseguimos guardar a foto. Seus outros registros continuam salvos.')
@@ -602,21 +625,22 @@ function TimelinePage({ data, refresh, setNotice }: SharedProps) {
   return (
     <div className="page timeline-page">
       <PageHeader eyebrow="só sua" title="minha linha" />
-      <div className="filter-row"><button className={filter === 'all' ? 'selected' : ''} onClick={() => setFilter('all')}>tudo</button><button className={filter === 'milestones' ? 'selected' : ''} onClick={() => setFilter('milestones')}>marcos</button></div>
-      {visible.length === 0 ? <SimpleEmpty icon={<NotebookPen />} title={filter === 'milestones' ? 'Nenhum marco ainda' : 'Sua linha começa aqui'} text={filter === 'milestones' ? 'Você escolhe o que merece ficar em destaque.' : 'Use o + para guardar notas e fotos na sua história.'} /> : (
+      <div className="filter-row" role="tablist" aria-label="Ver registros da linha"><button role="tab" aria-selected={filter === 'all'} className={filter === 'all' ? 'selected' : ''} onClick={() => setFilter('all')}>tudo</button><button role="tab" aria-selected={filter === 'milestones'} className={filter === 'milestones' ? 'selected' : ''} onClick={() => setFilter('milestones')}>marcos</button><button role="tab" aria-selected={filter === 'media'} className={filter === 'media' ? 'selected' : ''} onClick={() => setFilter('media')}>mídia</button></div>
+      {filter === 'media' ? <TimelineMediaGallery items={media} entries={data.timeline} onOpen={setSelectedEntryId} /> : visible.length === 0 ? <SimpleEmpty icon={<NotebookPen />} title={filter === 'milestones' ? 'Nenhum marco ainda' : 'Sua linha começa aqui'} text={filter === 'milestones' ? 'Você escolhe o que merece ficar em destaque.' : 'Use o + para guardar notas e fotos na sua história.'} /> : (
         <div className="timeline-rail">
-          {visible.map((entry) => <TimelineItem key={entry.id} entry={entry} refresh={refresh} setNotice={setNotice} />)}
+          {visible.map((entry) => <TimelineItem key={entry.id} entry={entry} onOpen={() => setSelectedEntryId(entry.id)} refresh={refresh} setNotice={setNotice} />)}
         </div>
       )}
       <FloatingAddButton tone="pink" label="Adicionar à linha" onClick={() => setComposer(true)} />
-      {composer && <div className="sheet-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) setComposer(false) }}><form className="bottom-sheet composer" onSubmit={(event) => void saveEntry(event)}><div className="sheet-handle" /><header><h2>guardar na linha</h2><button type="button" className="icon-button" aria-label="Fechar" onClick={() => setComposer(false)}><X /></button></header>{photoBusy && <div className="photo-processing" role="status">preparando sua foto…</div>}{imageDataUrl && <div className="photo-ready"><img className="composer-preview" src={imageDataUrl} alt="Prévia da foto escolhida" onError={() => { setImageDataUrl(undefined); setNotice('Esta foto não pôde ser exibida. Tente outra imagem.') }} /><button type="button" aria-label="Remover foto escolhida" onClick={() => setImageDataUrl(undefined)}><X size={17} /></button></div>}<textarea value={note} onChange={(event) => setNote(event.target.value)} placeholder="O que você quer lembrar?" aria-label="Anotação" /><div className="composer-actions"><label className="secondary-button file-button"><ImagePlus size={18} /> {imageDataUrl ? 'trocar foto' : 'foto'}<input type="file" accept="image/jpeg,image/png,image/webp,image/avif,image/heic,image/heif,image/heic-sequence,image/heif-sequence,.heic,.heif" onChange={(event) => void choosePhoto(event)} /></label><button className="primary-button" disabled={photoBusy || (!note.trim() && !imageDataUrl)}>guardar</button></div><p className="privacy-note"><Info size={15} /> A foto é otimizada e fica neste aparelho.</p></form></div>}
+      <TimelineDetailDialog entry={selectedEntry} workout={selectedEntry?.sourceId ? data.workouts.find((workout) => workout.id === selectedEntry.sourceId) : undefined} loadUnit={data.profile.loadUnit} onClose={() => setSelectedEntryId(undefined)} />
+      {composer && <div className="sheet-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget && !photoBusy) setComposer(false) }}><form className="bottom-sheet composer" onSubmit={(event) => void saveEntry(event)}><div className="sheet-handle" /><header><div><h2>guardar na linha</h2><p className="composer-count">{imageDataUrls.length} de {MAX_TIMELINE_PHOTOS} fotos</p></div><button type="button" className="icon-button" aria-label="Fechar" disabled={photoBusy} onClick={() => setComposer(false)}><X /></button></header>{photoBusy && <div className="photo-processing" role="status">preparando foto {photoProgress.current} de {photoProgress.total}…</div>}{imageDataUrls.length > 0 && <div className={`composer-previews count-${imageDataUrls.length}`}>{imageDataUrls.map((source, index) => <div className="photo-ready" key={`${source.slice(-24)}-${index}`}><img className="composer-preview" src={source} alt={`Prévia da foto ${index + 1}`} onError={() => { setImageDataUrls((current) => current.filter((_, itemIndex) => itemIndex !== index)); setNotice('Uma foto não pôde ser exibida e foi removida.') }} /><button type="button" aria-label={`Remover foto ${index + 1}`} onClick={() => setImageDataUrls((current) => current.filter((_, itemIndex) => itemIndex !== index))}><X size={17} /></button></div>)}</div>}<textarea value={note} onChange={(event) => setNote(event.target.value)} placeholder="O que você quer lembrar?" aria-label="Anotação" /><div className="composer-actions"><label className={`secondary-button file-button ${imageDataUrls.length >= MAX_TIMELINE_PHOTOS ? 'disabled' : ''}`}><ImagePlus size={18} /> {imageDataUrls.length > 0 ? 'adicionar fotos' : 'escolher fotos'}<input type="file" multiple disabled={photoBusy || imageDataUrls.length >= MAX_TIMELINE_PHOTOS} accept="image/jpeg,image/png,image/webp,image/avif,image/heic,image/heif,image/heic-sequence,image/heif-sequence,.heic,.heif" onChange={(event) => void choosePhoto(event)} /></label><button className="primary-button" disabled={photoBusy || (!note.trim() && imageDataUrls.length === 0)}>guardar</button></div><p className="privacy-note"><Info size={15} /> Até 5 fotos, otimizadas e guardadas neste aparelho.</p></form></div>}
     </div>
   )
 }
 
-function TimelineItem({ entry, refresh, setNotice }: { entry: TimelineEntry; refresh: () => Promise<void>; setNotice: (message: string) => void }) {
+function TimelineItem({ entry, onOpen, refresh, setNotice }: { entry: TimelineEntry; onOpen: () => void; refresh: () => Promise<void>; setNotice: (message: string) => void }) {
   const [removeConfirm, setRemoveConfirm] = useState(false)
-  const [imageFailed, setImageFailed] = useState(false)
+  const images = timelineImages(entry)
   const toggleMilestone = async () => { await db.timeline.put({ ...entry, isMilestone: !entry.isMilestone }); await refresh(); setNotice(entry.isMilestone ? 'Marco removido.' : 'Virou um marco seu.') }
   const remove = async () => { await db.timeline.delete(entry.id); await refresh(); setNotice('Registro removido.') }
   return (
@@ -624,16 +648,70 @@ function TimelineItem({ entry, refresh, setNotice }: { entry: TimelineEntry; ref
       <div className="timeline-dot">{entry.kind === 'workout' ? <Dumbbell size={16} /> : entry.kind === 'photo' ? <ImagePlus size={16} /> : <PencilLine size={16} />}</div>
       <div className="timeline-date"><strong>{formatDay(entry.occurredAt)}</strong><span>{formatTime(entry.occurredAt)}</span></div>
       <div className="timeline-content">
-        {entry.isMilestone && <p className="milestone-label"><Star size={14} fill="currentColor" /> meu marco</p>}
-        <h2>{entry.title}</h2>
-        {entry.text && <p>{entry.text}</p>}
-        {entry.imageDataUrl && !imageFailed && <img src={entry.imageDataUrl} alt={entry.text ? `Foto: ${entry.text}` : 'Foto pessoal sem descrição'} onError={() => setImageFailed(true)} />}
-        {entry.imageDataUrl && imageFailed && <div className="photo-unavailable"><ImagePlus size={20} /><span>Esta foto não está disponível.</span></div>}
+        <button className="timeline-open" onClick={onOpen} aria-label={`Abrir detalhes de ${entry.title}`}>
+          {entry.isMilestone && <span className="milestone-label"><Star size={14} fill="currentColor" /> meu marco</span>}
+          <h2>{entry.title}</h2>
+          {entry.text && <p>{entry.text}</p>}
+          {images.length > 0 && <TimelineMediaCollage images={images} text={entry.text} />}
+          <span className="open-detail-hint">ver detalhes <ChevronRight size={15} /></span>
+        </button>
         <div className="entry-actions"><button onClick={() => void toggleMilestone()}><Star size={16} fill={entry.isMilestone ? 'currentColor' : 'none'} /> {entry.isMilestone ? 'desmarcar' : 'marcar'}</button><button onClick={() => setRemoveConfirm(true)}><Trash2 size={16} /> remover</button></div>
       </div>
       <ConfirmDialog open={removeConfirm} title="remover da sua linha?" confirmLabel="remover registro" tone="danger" onClose={() => setRemoveConfirm(false)} onConfirm={() => void remove()}><p>Este registro será apagado deste aparelho.</p></ConfirmDialog>
     </article>
   )
+}
+
+function TimelineMediaCollage({ images, text, variant = 'summary' }: { images: string[]; text?: string; variant?: 'summary' | 'detail' }) {
+  return <div className={`timeline-collage count-${images.length} ${variant}`}>{images.map((source, index) => <TimelineImage key={`${source.slice(-24)}-${index}`} source={source} alt={text ? `Foto ${index + 1}: ${text}` : `Foto pessoal ${index + 1} sem descrição`} />)}</div>
+}
+
+function TimelineImage({ source, alt }: { source: string; alt: string }) {
+  const [failed, setFailed] = useState(false)
+  useEffect(() => setFailed(false), [source])
+  return <span className="timeline-photo-tile">{failed ? <span className="photo-unavailable"><ImagePlus size={20} /><span>Foto indisponível</span></span> : <img src={source} alt={alt} loading="lazy" onError={() => setFailed(true)} />}</span>
+}
+
+function TimelineMediaGallery({ items, entries, onOpen }: { items: ReturnType<typeof timelineMedia>; entries: TimelineEntry[]; onOpen: (entryId: string) => void }) {
+  if (items.length === 0) return <SimpleEmpty icon={<ImagePlus />} title="Nenhuma mídia ainda" text="As fotos guardadas na sua linha aparecem aqui." />
+  return <section className="timeline-gallery" aria-label={`${items.length} ${items.length === 1 ? 'foto' : 'fotos'} na sua linha`}>{items.map((item) => {
+    const entry = entries.find((candidate) => candidate.id === item.entryId)
+    return <button key={item.id} onClick={() => onOpen(item.entryId)} aria-label={`Abrir foto ${item.position} de ${item.totalInEntry} do registro de ${formatLongDate(item.occurredAt)}`}><TimelineImage source={item.source} alt={entry?.text ? `Foto: ${entry.text}` : 'Foto pessoal sem descrição'} /></button>
+  })}</section>
+}
+
+function TimelineDetailDialog({ entry, workout, loadUnit, onClose }: { entry?: TimelineEntry; workout?: Workout; loadUnit: Profile['loadUnit']; onClose: () => void }) {
+  const titleId = useId()
+  const closeButton = useRef<HTMLButtonElement>(null)
+  useEffect(() => {
+    if (!entry) return
+    const previouslyFocused = document.activeElement instanceof HTMLElement ? document.activeElement : undefined
+    const previousOverflow = document.body.style.overflow
+    document.body.style.overflow = 'hidden'
+    const focusFrame = window.requestAnimationFrame(() => closeButton.current?.focus())
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') onClose()
+      if (event.key !== 'Tab') return
+      const dialog = closeButton.current?.closest('[role="dialog"]')
+      const focusable = Array.from(dialog?.querySelectorAll<HTMLElement>('button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])') ?? []).filter((element) => !element.hasAttribute('disabled'))
+      if (focusable.length === 0) return
+      const first = focusable[0]
+      const last = focusable.at(-1) ?? first
+      if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last.focus() }
+      else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first.focus() }
+    }
+    window.addEventListener('keydown', onKeyDown)
+    return () => {
+      window.cancelAnimationFrame(focusFrame)
+      window.removeEventListener('keydown', onKeyDown)
+      document.body.style.overflow = previousOverflow
+      previouslyFocused?.focus()
+    }
+  }, [entry?.id])
+  if (!entry) return null
+  const images = timelineImages(entry)
+  const kindLabel = entry.kind === 'workout' ? 'treino' : images.length > 0 ? `${images.length} ${images.length === 1 ? 'foto' : 'fotos'}` : 'nota'
+  return <div className="detail-dialog-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose() }}><section className="timeline-detail-dialog" role="dialog" aria-modal="true" aria-labelledby={titleId}><header><div><p className="eyebrow">{kindLabel} · {formatLongDate(entry.occurredAt)} · {formatTime(entry.occurredAt)}</p><h2 id={titleId}>{entry.title}</h2></div><button ref={closeButton} className="icon-button" aria-label="Fechar detalhes" onClick={onClose}><X /></button></header>{entry.isMilestone && <p className="milestone-label"><Star size={14} fill="currentColor" /> meu marco</p>}{entry.text && <p className="timeline-detail-text">{entry.text}</p>}{images.length > 0 && <TimelineMediaCollage images={images} text={entry.text} variant="detail" />}{workout && <div className="timeline-workout-detail"><p className="timeline-workout-summary">{workoutDurationMinutes(workout)} min · {workout.items.length} {workout.items.length === 1 ? 'atividade' : 'atividades'}{workout.feeling ? ` · ${workout.feeling}` : ''}</p>{workout.items.map((item) => <section key={item.id}><h3>{item.exerciseName}</h3><p>{item.sets.filter((set) => set.completed).map((set) => formatSetSummary(set, item.metricMode, loadUnit)).join(' · ') || 'Sem registros concluídos'}</p>{item.note && <small>{item.note}</small>}</section>)}</div>}</section></div>
 }
 
 function ExercisesPage({ data, refresh, setNotice, allExercises, allTemplates }: SharedProps) {
@@ -739,7 +817,7 @@ function ProfilePage({ data, refresh, setNotice }: SharedProps) {
   const displayWeight = profile.bodyWeightKg === undefined ? undefined : profile.loadUnit === 'kg' ? profile.bodyWeightKg : kgToLb(profile.bodyWeightKg)
   const bmi = calculateBmi(profile.bodyWeightKg, profile.heightCm)
   const exportData = async () => {
-    const backup = { app: BACKUP_APP_ID, schemaVersion: 2, exportedAt: new Date().toISOString(), data }
+    const backup = { app: BACKUP_APP_ID, schemaVersion: 3, exportedAt: new Date().toISOString(), data }
     const url = URL.createObjectURL(new Blob([JSON.stringify(backup, null, 2)], { type: 'application/json' }))
     const anchor = document.createElement('a')
     anchor.href = url
@@ -753,7 +831,7 @@ function ProfilePage({ data, refresh, setNotice }: SharedProps) {
     if (!file) return
     try {
       const backup = JSON.parse(await file.text()) as { app?: string; schemaVersion?: number; data?: AppSnapshot }
-      if (!backup.app || !ACCEPTED_BACKUP_APP_IDS.has(backup.app) || ![1, 2].includes(backup.schemaVersion ?? 0) || !backup.data) throw new Error('invalid')
+      if (!backup.app || !ACCEPTED_BACKUP_APP_IDS.has(backup.app) || ![1, 2, 3].includes(backup.schemaVersion ?? 0) || !backup.data) throw new Error('invalid')
       setPendingBackup({ data: backup.data })
     } catch {
       setNotice('Este arquivo não é um backup válido.')
