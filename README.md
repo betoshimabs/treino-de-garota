@@ -1,4 +1,4 @@
-# treino de garota
+# BRABITA
 
 Um diário pessoal de treino, feito para registrar o que aconteceu e acompanhar a própria história sem cobrança.
 

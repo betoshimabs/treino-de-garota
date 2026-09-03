@@ -18,6 +18,7 @@ class TreinoDatabase extends Dexie {
   profiles!: EntityTable<Profile, 'id'>
 
   constructor() {
+    // Mantido para preservar os dados locais criados antes da marca BRABITA.
     super('treino-de-garota')
     this.version(1).stores({
       workouts: 'id, status, startedAt, endedAt',

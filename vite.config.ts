@@ -28,7 +28,7 @@ export default defineConfig({
   plugins: [
     react(),
     {
-      name: 'treino-de-garota-version',
+      name: 'brabita-version',
       generateBundle() {
         this.emitFile({
           type: 'asset',
@@ -40,16 +40,15 @@ export default defineConfig({
     VitePWA({
       registerType: 'autoUpdate',
       includeAssets: [
-        'brand-mark.svg',
-        'favicon-32.png',
-        'apple-touch-icon.png',
-        'icon-192.png',
-        'icon-512.png',
-        'icon-512-maskable.png',
+        'brabita-favicon-32.png',
+        'brabita-apple-touch-icon.png',
+        'brabita-icon-192.png',
+        'brabita-icon-512.png',
+        'brabita-icon-512-maskable.png',
       ],
       manifest: {
-        name: 'Treino de Garota',
-        short_name: 'treino',
+        name: 'BRABITA',
+        short_name: 'BRABITA',
         description: 'Seu treino, do jeito que aconteceu.',
         id: '/treino-de-garota/',
         theme_color: '#f6f1e3',
@@ -60,19 +59,19 @@ export default defineConfig({
         scope: '/treino-de-garota/',
         icons: [
           {
-            src: 'icon-192.png',
+            src: 'brabita-icon-192.png',
             sizes: '192x192',
             type: 'image/png',
             purpose: 'any'
           },
           {
-            src: 'icon-512.png',
+            src: 'brabita-icon-512.png',
             sizes: '512x512',
             type: 'image/png',
             purpose: 'any'
           },
           {
-            src: 'icon-512-maskable.png',
+            src: 'brabita-icon-512-maskable.png',
             sizes: '512x512',
             type: 'image/png',
             purpose: 'maskable'

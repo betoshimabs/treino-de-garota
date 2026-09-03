@@ -43,6 +43,9 @@ const formatLongDate = (value: string) => new Intl.DateTimeFormat('pt-BR', { wee
 const formatTime = (value: string) => new Intl.DateTimeFormat('pt-BR', { hour: '2-digit', minute: '2-digit' }).format(new Date(value))
 const emptySnapshot: AppSnapshot = { workouts: [], timeline: [], favorites: [], customExercises: [], customTemplates: [], profile: defaultProfile }
 const INSTALL_SNOOZE_KEY = 'tg-install-snoozed-until'
+const BRAND_ICON_URL = `${import.meta.env.BASE_URL}brabita-icon-192.png`
+const BACKUP_APP_ID = 'brabita'
+const ACCEPTED_BACKUP_APP_IDS = new Set([BACKUP_APP_ID, 'treino-de-garota'])
 
 interface BeforeInstallPromptEvent extends Event {
   prompt: () => Promise<void>
@@ -142,7 +145,7 @@ function AppContent() {
   }
 
   if (loading) {
-    return <main className="loading-screen"><span className="brand-mark">tg</span><p>Abrindo seu diário…</p></main>
+    return <main className="loading-screen"><img className="brand-logo" src={BRAND_ICON_URL} alt="" /><strong className="brand-name">BRABITA</strong><p>Abrindo seu diário…</p></main>
   }
 
   if (!data.profile.onboarded) {
@@ -167,7 +170,7 @@ function AppContent() {
         </NavLink>
       )}
       {showInstall && <aside className={`install-nudge ${showNav ? '' : 'during-workout'}`} aria-label="Instalar aplicativo">
-        <img className="install-mark" src={`${import.meta.env.BASE_URL}icon-192.png`} alt="" />
+        <img className="install-mark" src={BRAND_ICON_URL} alt="" />
         <div><strong>levar o diário com você</strong><p>{showIosHelp ? 'No Safari, toque em Compartilhar e depois em “Adicionar à Tela de Início”.' : 'Instale para abrir rápido e usar offline.'}</p></div>
         {!showIosHelp && <button className="install-action" onClick={async () => {
           if (!installPrompt) { setShowIosHelp(true); return }
@@ -211,7 +214,7 @@ function Onboarding({ profile, onDone }: { profile: Profile; onDone: (profile: P
   const [busy, setBusy] = useState(false)
   return (
     <main className="onboarding">
-      <div className="onboarding-mark"><span>tg</span></div>
+      <div className="onboarding-mark"><img className="brand-logo" src={BRAND_ICON_URL} alt="" /><span className="brand-name">BRABITA</span></div>
       <p className="eyebrow">seu diário de treino</p>
       <h1>Do jeito que<br />aconteceu.</h1>
       <p className="lead">Registre seu treino e acompanhe sua história, sem cobrança.</p>
@@ -736,11 +739,11 @@ function ProfilePage({ data, refresh, setNotice }: SharedProps) {
   const displayWeight = profile.bodyWeightKg === undefined ? undefined : profile.loadUnit === 'kg' ? profile.bodyWeightKg : kgToLb(profile.bodyWeightKg)
   const bmi = calculateBmi(profile.bodyWeightKg, profile.heightCm)
   const exportData = async () => {
-    const backup = { app: 'treino-de-garota', schemaVersion: 2, exportedAt: new Date().toISOString(), data }
+    const backup = { app: BACKUP_APP_ID, schemaVersion: 2, exportedAt: new Date().toISOString(), data }
     const url = URL.createObjectURL(new Blob([JSON.stringify(backup, null, 2)], { type: 'application/json' }))
     const anchor = document.createElement('a')
     anchor.href = url
-    anchor.download = `treino-de-garota-${new Date().toISOString().slice(0, 10)}.json`
+    anchor.download = `brabita-${new Date().toISOString().slice(0, 10)}.json`
     anchor.click()
     URL.revokeObjectURL(url)
     setNotice('Backup baixado.')
@@ -750,7 +753,7 @@ function ProfilePage({ data, refresh, setNotice }: SharedProps) {
     if (!file) return
     try {
       const backup = JSON.parse(await file.text()) as { app?: string; schemaVersion?: number; data?: AppSnapshot }
-      if (backup.app !== 'treino-de-garota' || ![1, 2].includes(backup.schemaVersion ?? 0) || !backup.data) throw new Error('invalid')
+      if (!backup.app || !ACCEPTED_BACKUP_APP_IDS.has(backup.app) || ![1, 2].includes(backup.schemaVersion ?? 0) || !backup.data) throw new Error('invalid')
       setPendingBackup({ data: backup.data })
     } catch {
       setNotice('Este arquivo não é um backup válido.')
@@ -816,7 +819,7 @@ function ProfilePage({ data, refresh, setNotice }: SharedProps) {
         <input ref={fileRef} hidden type="file" accept="application/json" onChange={(event) => void importData(event)} />
         <button className="danger-action" onClick={() => setEraseConfirm(true)}><Trash2 size={18} /> apagar todos os dados</button>
       </section>
-      <footer className="app-footer"><span className="brand-mark small">tg</span><p>treino de garota · versão {CURRENT_RELEASE.version}</p></footer>
+      <footer className="app-footer"><img className="brand-logo small" src={BRAND_ICON_URL} alt="" /><p><strong className="brand-name">BRABITA</strong> · versão {CURRENT_RELEASE.version}</p></footer>
     </div>
     <ConfirmDialog open={Boolean(pendingBackup)} title="restaurar este backup?" confirmLabel="restaurar backup" onClose={() => setPendingBackup(undefined)} onConfirm={() => void restoreBackup()} busy={dataActionBusy}><p>Os dados atuais deste aparelho serão substituídos pelo conteúdo do arquivo.</p></ConfirmDialog>
     <ConfirmDialog open={eraseConfirm} title="apagar todos os dados?" confirmLabel="apagar tudo" tone="danger" onClose={() => setEraseConfirm(false)} onConfirm={() => void erase()} busy={dataActionBusy}><p>Treinos, fotos, notas, modelos e preferências serão removidos deste aparelho. Esta ação não pode ser desfeita.</p></ConfirmDialog>
@@ -828,7 +831,7 @@ function AppUpdateScreen({ flow, onRetry }: { flow: UpdateFlow; onRetry: () => v
   const stalled = flow.phase === 'stalled'
   const version = complete ? CURRENT_RELEASE.version : flow.target?.version
   return <main className="app-update-screen" aria-live="polite" aria-busy={!complete && !stalled}>
-    <img src={`${import.meta.env.BASE_URL}icon-192.png`} alt="" />
+    <img src={BRAND_ICON_URL} alt="" />
     {complete ? <span className="update-status-icon complete"><Check /></span> : stalled ? <span className="update-status-icon stalled"><RotateCcw /></span> : <span className="update-status-icon loading" />}
     <div>
       <p className="eyebrow">{complete ? 'tudo certo' : stalled ? 'a atualização pausou' : 'só um instante'}</p>

@@ -1,16 +1,16 @@
 import sharp from 'sharp'
 import { fileURLToPath } from 'node:url'
 
-const source = fileURLToPath(new URL('../assets/brand/tg-logo.png', import.meta.url))
+const source = fileURLToPath(new URL('../assets/brand/brabita-logo.png', import.meta.url))
 
 const outputPath = (name) => fileURLToPath(new URL(`../public/${name}`, import.meta.url))
 const pngOptions = { compressionLevel: 9, palette: true, quality: 100 }
 
 const regularIcons = [
-  { size: 32, name: 'favicon-32.png' },
-  { size: 180, name: 'apple-touch-icon.png' },
-  { size: 192, name: 'icon-192.png' },
-  { size: 512, name: 'icon-512.png' },
+  { size: 32, name: 'brabita-favicon-32.png' },
+  { size: 180, name: 'brabita-apple-touch-icon.png' },
+  { size: 192, name: 'brabita-icon-192.png' },
+  { size: 512, name: 'brabita-icon-512.png' },
 ]
 
 const cornerPixel = await sharp(source)
@@ -32,9 +32,12 @@ await Promise.all(regularIcons.map(({ size, name }) => sharp(source)
   .toFile(outputPath(name))))
 
 const maskableSize = 512
-const safeArtworkSize = Math.round(maskableSize * 0.72)
+const safeArtworkSize = Math.round(maskableSize * 0.76)
+const circularMask = Buffer.from(`<svg width="${safeArtworkSize}" height="${safeArtworkSize}" xmlns="http://www.w3.org/2000/svg"><circle cx="50%" cy="50%" r="50%" fill="white"/></svg>`)
 const safeArtwork = await sharp(source)
   .resize(safeArtworkSize, safeArtworkSize, { fit: 'contain' })
+  .ensureAlpha()
+  .composite([{ input: circularMask, blend: 'dest-in' }])
   .png()
   .toBuffer()
 
@@ -48,6 +51,6 @@ await sharp({
 })
   .composite([{ input: safeArtwork, gravity: 'centre' }])
   .png(pngOptions)
-  .toFile(outputPath('icon-512-maskable.png'))
+  .toFile(outputPath('brabita-icon-512-maskable.png'))
 
-console.log('Ícones PWA gerados a partir de assets/brand/tg-logo.png')
+console.log('Ícones PWA gerados a partir de assets/brand/brabita-logo.png')
