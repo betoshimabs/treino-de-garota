@@ -1,4 +1,13 @@
-import type { MetricMode, WorkoutSet } from './types'
+import type { MetricMode, WorkoutMetric, WorkoutSet } from './types'
+
+export const workoutMetricOrder: WorkoutMetric[] = ['load', 'reps', 'distance', 'duration']
+
+export function defaultMetricsForMode(metricMode: MetricMode): WorkoutMetric[] {
+  if (metricMode === 'load-reps') return ['load', 'reps']
+  if (metricMode === 'reps-only') return ['reps']
+  if (metricMode === 'distance-time') return ['distance', 'duration']
+  return ['duration']
+}
 
 export function parseLocalizedNumber(raw: string): number | undefined {
   const normalized = raw.trim().replace(/\s/g, '').replace(',', '.')
@@ -13,10 +22,16 @@ export function formatLocalizedNumber(value?: number): string {
 }
 
 export function isSetValid(set: WorkoutSet, metricMode: MetricMode): boolean {
-  if (metricMode === 'load-reps') return positive(set.load) && positive(set.reps)
-  if (metricMode === 'reps-only') return positive(set.reps)
-  if (metricMode === 'distance-time') return positive(set.distanceKm) && positive(set.durationMinutes)
-  return positive(set.durationMinutes)
+  return isSetValidForMetrics(set, defaultMetricsForMode(metricMode))
+}
+
+export function isSetValidForMetrics(set: WorkoutSet, metrics: WorkoutMetric[]): boolean {
+  return metrics.length > 0 && metrics.every((metric) => {
+    if (metric === 'load') return positive(set.load)
+    if (metric === 'reps') return positive(set.reps)
+    if (metric === 'distance') return positive(set.distanceKm)
+    return positive(set.durationMinutes)
+  })
 }
 
 export function calculateBmi(weightKg?: number, heightCm?: number): number | undefined {

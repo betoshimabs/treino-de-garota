@@ -1,4 +1,5 @@
 import type { Workout } from './types'
+import { defaultMetricsForMode } from './domain'
 
 export function completedWorkouts(workouts: Workout[]) {
   return workouts.filter((workout) => workout.status === 'completed')
@@ -27,7 +28,7 @@ export function exerciseProgress(workouts: Workout[], exerciseId: string) {
   return completedWorkouts(workouts)
     .map((workout) => {
       const loads = workout.items
-        .filter((item) => item.exerciseId === exerciseId)
+        .filter((item) => item.exerciseId === exerciseId && (item.metrics ?? defaultMetricsForMode(item.metricMode)).includes('load'))
         .flatMap((item) => item.sets)
         .filter((set) => set.completed && typeof set.load === 'number')
         .map((set) => set.load as number)

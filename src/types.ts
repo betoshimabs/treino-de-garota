@@ -3,6 +3,7 @@ export type WorkoutStatus = 'active' | 'completed'
 export type Feeling = 'leve' | 'normal' | 'intenso'
 export type ActivityCategory = 'strength' | 'cardio' | 'other'
 export type MetricMode = 'load-reps' | 'reps-only' | 'distance-time' | 'time-only'
+export type WorkoutMetric = 'load' | 'reps' | 'distance' | 'duration'
 export type ExerciseVisual = 'squat' | 'press' | 'hinge' | 'bridge' | 'lunge' | 'pull' | 'raise' | 'curl' | 'plank' | 'walk' | 'cycle' | 'flow'
 
 export interface Exercise {
@@ -33,6 +34,8 @@ export interface WorkoutItem {
   exerciseName: string
   category: ActivityCategory
   metricMode: MetricMode
+  /** Métricas escolhidas neste treino. Ausente em registros antigos, que usam metricMode como padrão. */
+  metrics?: WorkoutMetric[]
   sets: WorkoutSet[]
   note?: string
 }

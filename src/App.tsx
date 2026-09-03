@@ -4,6 +4,7 @@ import {
   BarChart3,
   BookOpen,
   Check,
+  ChevronLeft,
   ChevronRight,
   Clock3,
   Download,
@@ -13,7 +14,6 @@ import {
   ImagePlus,
   Info,
   LogOut,
-  MoreHorizontal,
   NotebookPen,
   PencilLine,
   Play,
@@ -22,6 +22,7 @@ import {
   Search,
   ShieldCheck,
   SlidersHorizontal,
+  Square,
   Star,
   Trash2,
   Upload,
@@ -33,13 +34,13 @@ import { CURRENT_RELEASE, getInitialUpdateFlow, type AppRelease, type UpdateFlow
 import { db, clearAllData, defaultProfile, loadSnapshot, saveProfile } from './db'
 import { exerciseGroups, exercises as systemExercises } from './data/exercises'
 import { systemTemplates } from './data/templates'
-import { calculateBmi, formatLocalizedNumber, isSetValid, kgToLb, lbToKg, parseLocalizedNumber } from './domain'
+import { calculateBmi, defaultMetricsForMode, formatLocalizedNumber, isSetValidForMetrics, kgToLb, lbToKg, parseLocalizedNumber, workoutMetricOrder } from './domain'
 import { ExerciseVisual } from './components/ExerciseVisual'
 import { applyAppUpdate } from './pwa-update'
 import { getAuthErrorMessage, useAuth } from './auth'
 import { exerciseProgress, thisMonthCount, totalCompletedSets, workoutDurationMinutes } from './stats'
 import { MAX_TIMELINE_PHOTOS, timelineImages, timelineMedia } from './timeline'
-import type { ActivityCategory, AppSnapshot, Exercise, Feeling, MetricMode, Profile, TimelineEntry, Workout, WorkoutItem, WorkoutSet, WorkoutTemplate } from './types'
+import type { ActivityCategory, AppSnapshot, Exercise, Feeling, MetricMode, Profile, TimelineEntry, Workout, WorkoutItem, WorkoutMetric, WorkoutSet, WorkoutTemplate } from './types'
 
 const makeId = () => crypto.randomUUID()
 const formatDay = (value: string) => new Intl.DateTimeFormat('pt-BR', { day: '2-digit', month: 'short' }).format(new Date(value)).replace('.', '')
@@ -239,7 +240,8 @@ function Onboarding({ profile, onDone }: { profile: Profile; onDone: (profile: P
 }
 
 function PageHeader({ eyebrow, title, action }: { eyebrow?: string; title: string; action?: ReactNode }) {
-  return <header className="page-header"><div>{eyebrow && <p className="eyebrow">{eyebrow}</p>}<h1>{title}</h1></div>{action}</header>
+  const waveVariant = title === 'hoje' ? 'one' : title === 'minha linha' ? 'two' : title === 'biblioteca' ? 'three' : title === 'evolução' ? 'four' : 'five'
+  return <header className={`page-header wave-${waveVariant}`}><div>{eyebrow && <p className="eyebrow">{eyebrow}</p>}<h1>{title}</h1></div>{action}</header>
 }
 
 function TodayPage({ data, refresh, allExercises, allTemplates }: SharedProps) {
@@ -261,8 +263,9 @@ function TodayPage({ data, refresh, allExercises, allTemplates }: SharedProps) {
       restSeconds: repeat?.restSeconds ?? 90,
       items: repeat?.items.map((item) => ({
         id: makeId(), exerciseId: item.exerciseId, exerciseName: item.exerciseName, category: item.category, metricMode: item.metricMode,
+        metrics: item.metrics ?? defaultMetricsForMode(item.metricMode),
         sets: [{ id: makeId(), completed: false }],
-      })) ?? templateItems?.map((exercise) => ({ id: makeId(), exerciseId: exercise.id, exerciseName: exercise.name, category: exercise.category, metricMode: exercise.metricMode, sets: [{ id: makeId(), completed: false }] })) ?? [],
+      })) ?? templateItems?.map((exercise) => ({ id: makeId(), exerciseId: exercise.id, exerciseName: exercise.name, category: exercise.category, metricMode: exercise.metricMode, metrics: defaultMetricsForMode(exercise.metricMode), sets: [{ id: makeId(), completed: false }] })) ?? [],
     }
     await db.workouts.put(workout)
     await refresh()
@@ -288,7 +291,7 @@ function TodayPage({ data, refresh, allExercises, allTemplates }: SharedProps) {
       </section>}
 
       <section className="at-a-glance" aria-labelledby="glance-title">
-        <div className="section-heading"><div><p className="eyebrow">um olhar rápido</p><h2 id="glance-title">seu ritmo</h2></div><span className="hand-line" /></div>
+        <div className="section-heading"><div><p className="eyebrow">um olhar rápido</p><h2 id="glance-title">seu ritmo</h2></div></div>
         <div className="glance-grid">
           <div><strong>{monthCount}</strong><span>{monthCount === 1 ? 'treino este mês' : 'treinos este mês'}</span></div>
           <div><strong>{totalCompletedSets(data.workouts)}</strong><span>registros concluídos</span></div>
@@ -352,6 +355,7 @@ function WorkoutPage({ data, refresh, setNotice, allExercises, allTemplates }: S
   const closePicker = () => { setPickerOpen(false); setQuery('') }
   const toWorkoutItem = (exercise: Exercise): WorkoutItem => ({
     id: makeId(), exerciseId: exercise.id, exerciseName: exercise.name, category: exercise.category, metricMode: exercise.metricMode,
+    metrics: defaultMetricsForMode(exercise.metricMode),
     sets: [{ id: makeId(), completed: false }],
   })
   const addExercise = async (exercise: Exercise) => {
@@ -378,12 +382,25 @@ function WorkoutPage({ data, refresh, setNotice, allExercises, allTemplates }: S
   const updateSet = async (itemId: string, setId: string, patch: Partial<WorkoutSet>) => {
     await updateItem(itemId, (item) => ({ ...item, sets: item.sets.map((set) => set.id === setId ? { ...set, ...patch } : set) }))
   }
+  const toggleMetric = async (itemId: string, metric: WorkoutMetric) => {
+    const item = (await db.workouts.get(active.id) ?? active).items.find((candidate) => candidate.id === itemId)
+    if (!item) return
+    const current = item.metrics ?? defaultMetricsForMode(item.metricMode)
+    if (current.includes(metric) && current.length === 1) {
+      setNotice('Mantenha ao menos uma medida para concluir o registro.')
+      return
+    }
+    const next = current.includes(metric)
+      ? current.filter((candidate) => candidate !== metric)
+      : workoutMetricOrder.filter((candidate) => current.includes(candidate) || candidate === metric)
+    await updateItem(itemId, (candidate) => ({ ...candidate, metrics: next }))
+  }
   const completeSet = async (itemId: string, set: WorkoutSet) => {
     const latestWorkout = await db.workouts.get(active.id) ?? active
     const item = latestWorkout.items.find((row) => row.id === itemId)
     const latestSet = item?.sets.find((row) => row.id === set.id)
     if (!item || !latestSet) return
-    if (!latestSet.completed && !isSetValid(latestSet, item.metricMode)) {
+    if (!latestSet.completed && !isSetValidForMetrics(latestSet, item.metrics ?? defaultMetricsForMode(item.metricMode))) {
       setNotice(item.category === 'strength' ? 'Preencha os valores obrigatórios acima de zero.' : 'Preencha os dados da atividade acima de zero.')
       return
     }
@@ -447,7 +464,7 @@ function WorkoutPage({ data, refresh, setNotice, allExercises, allTemplates }: S
       <header className="workout-topbar">
         <button className="icon-button" aria-label="Voltar" onClick={() => navigate('/')}><ArrowLeft /></button>
         <div><p>treino em andamento</p><strong>{elapsed < 1 ? 'agora' : `${elapsed} min`}</strong></div>
-        <button className="icon-button" aria-label="Opções do treino" onClick={() => setAbandonConfirm(true)}><MoreHorizontal /></button>
+        <button className="stop-workout-button" aria-label="Parar ou cancelar treino" title="Parar ou cancelar treino" onClick={() => setAbandonConfirm(true)}><Square size={18} fill="currentColor" /></button>
       </header>
       <div className="workout-title-wrap">
         <input className="workout-title" aria-label="Nome do treino" value={active.title} onChange={(event) => void persist({ ...active, title: event.target.value })} />
@@ -471,17 +488,18 @@ function WorkoutPage({ data, refresh, setNotice, allExercises, allTemplates }: S
         {visibleItems.map((item, itemIndex) => (
           <section className="exercise-block" key={item.id} aria-labelledby={`exercise-${item.id}`}>
             <div className="exercise-block-title"><span>{String(itemIndex + 1).padStart(2, '0')}</span><h2 id={`exercise-${item.id}`}>{item.exerciseName}</h2><button className="icon-button small" aria-label={`Remover ${item.exerciseName}`} onClick={() => void persist({ ...active, items: active.items.filter((row) => row.id !== item.id) })}><X /></button></div>
-            <div className="set-head"><span>{item.category === 'strength' ? 'série' : 'reg.'}</span><MetricLabels mode={item.metricMode} unit={data.profile.loadUnit} /><span>feito</span><span aria-hidden="true" /></div>
+            <MetricSelector item={item} unit={data.profile.loadUnit} onToggle={(metric) => void toggleMetric(item.id, metric)} />
+            <div className="set-head"><span>{item.category === 'strength' ? 'série' : 'reg.'}</span><MetricLabels metrics={item.metrics ?? defaultMetricsForMode(item.metricMode)} unit={data.profile.loadUnit} /><span>feito</span><span aria-hidden="true" /></div>
             {item.sets.map((set, setIndex) => (
               <div className={set.completed ? 'set-row completed' : 'set-row'} key={set.id}>
                 <span className="set-number">{setIndex + 1}</span>
-                <MetricFields mode={item.metricMode} unit={data.profile.loadUnit} set={set} index={setIndex} onCommit={(patch) => void updateSet(item.id, set.id, patch)} />
+                <MetricFields metrics={item.metrics ?? defaultMetricsForMode(item.metricMode)} unit={data.profile.loadUnit} set={set} index={setIndex} onCommit={(patch) => void updateSet(item.id, set.id, patch)} />
                 <button className="set-check" aria-label={set.completed ? `Reabrir ${item.category === 'strength' ? 'série' : 'registro'} ${setIndex + 1}` : `Concluir ${item.category === 'strength' ? 'série' : 'registro'} ${setIndex + 1}`} aria-pressed={set.completed} onClick={() => void completeSet(item.id, set)}>{set.completed && <Check size={19} />}</button>
                 <button className="remove-set" aria-label={`Excluir ${item.category === 'strength' ? 'série' : 'registro'} ${setIndex + 1}`} onClick={() => void updateItem(item.id, (row) => ({ ...row, sets: row.sets.filter((entry) => entry.id !== set.id) }))}><Trash2 size={16} /></button>
               </div>
             ))}
             <button className="add-set" onClick={() => void updateItem(item.id, (row) => ({ ...row, sets: [...row.sets, { ...row.sets.at(-1), id: makeId(), completed: false }] }))}><Plus size={17} /> adicionar {item.category === 'strength' ? 'série' : 'registro'}</button>
-            <input className="note-input" aria-label={`Observação sobre ${item.exerciseName}`} placeholder="uma observação, se quiser…" value={item.note ?? ''} onChange={(event) => void updateItem(item.id, (row) => ({ ...row, note: event.target.value }))} />
+            <ExerciseNoteInput itemId={item.id} exerciseName={item.exerciseName} value={item.note} onCommit={(value) => void updateItem(item.id, (row) => ({ ...row, note: value }))} />
           </section>
         ))}
         <button className="workout-add-plus after-list" aria-label={section === 'strength' ? 'Adicionar outro exercício' : 'Adicionar outra atividade'} onClick={openPicker}><Plus size={26} /></button>
@@ -509,20 +527,58 @@ function WorkoutPage({ data, refresh, setNotice, allExercises, allTemplates }: S
   )
 }
 
-function MetricLabels({ mode, unit }: { mode: MetricMode; unit: Profile['loadUnit'] }) {
-  const labels = mode === 'load-reps' ? [`carga (${unit})`, 'reps'] : mode === 'distance-time' ? ['distância (km)', 'tempo (min)'] : mode === 'reps-only' ? ['repetições'] : ['tempo (min)']
-  return <span className={`metric-labels ${labels.length === 1 ? 'single' : ''}`}>{labels.map((label) => <span key={label}>{label}</span>)}</span>
+function metricLabel(metric: WorkoutMetric, unit: Profile['loadUnit'], compact = false) {
+  if (metric === 'load') return compact ? `carga ${unit}` : `carga (${unit})`
+  if (metric === 'reps') return compact ? 'reps' : 'repetições'
+  if (metric === 'distance') return compact ? 'distância' : 'distância (km)'
+  return compact ? 'tempo' : 'tempo (min)'
 }
 
-function MetricFields({ mode, unit, set, index, onCommit }: { mode: MetricMode; unit: Profile['loadUnit']; set: WorkoutSet; index: number; onCommit: (patch: Partial<WorkoutSet>) => void }) {
-  const fields = mode === 'load-reps'
-    ? [{ key: 'load' as const, value: set.load, label: `Carga da série ${index + 1} em ${unit}` }, { key: 'reps' as const, value: set.reps, label: `Repetições da série ${index + 1}` }]
-    : mode === 'distance-time'
-      ? [{ key: 'distanceKm' as const, value: set.distanceKm, label: `Distância do registro ${index + 1} em quilômetros` }, { key: 'durationMinutes' as const, value: set.durationMinutes, label: `Tempo do registro ${index + 1} em minutos` }]
-      : mode === 'reps-only'
-        ? [{ key: 'reps' as const, value: set.reps, label: `Repetições da série ${index + 1}` }]
-        : [{ key: 'durationMinutes' as const, value: set.durationMinutes, label: `Tempo do registro ${index + 1} em minutos` }]
-  return <span className={`metric-inputs ${fields.length === 1 ? 'single' : ''}`}>{fields.map((field) => <LocalizedNumberInput key={field.key} value={field.value} label={field.label} onCommit={(value) => onCommit({ [field.key]: value })} />)}</span>
+function MetricSelector({ item, unit, onToggle }: { item: WorkoutItem; unit: Profile['loadUnit']; onToggle: (metric: WorkoutMetric) => void }) {
+  const metrics = item.metrics ?? defaultMetricsForMode(item.metricMode)
+  return <details className="metric-selector"><summary><SlidersHorizontal size={15} /><span>o que registrar</span><small>{metrics.map((metric) => metricLabel(metric, unit, true)).join(' · ')}</small></summary><div className="metric-options" role="group" aria-label={`Métricas de ${item.exerciseName}`}>{workoutMetricOrder.map((metric) => {
+    const selected = metrics.includes(metric)
+    return <button type="button" key={metric} className={selected ? 'selected' : ''} aria-pressed={selected} onClick={() => onToggle(metric)}>{selected ? <Check size={15} /> : <Plus size={15} />}{metricLabel(metric, unit, true)}</button>
+  })}</div></details>
+}
+
+function MetricLabels({ metrics, unit }: { metrics: WorkoutMetric[]; unit: Profile['loadUnit'] }) {
+  return <span className={`metric-labels metrics-${metrics.length}`}>{metrics.map((metric) => <span key={metric}>{metricLabel(metric, unit)}</span>)}</span>
+}
+
+function MetricFields({ metrics, unit, set, index, onCommit }: { metrics: WorkoutMetric[]; unit: Profile['loadUnit']; set: WorkoutSet; index: number; onCommit: (patch: Partial<WorkoutSet>) => void }) {
+  type SetMetricKey = 'load' | 'reps' | 'distanceKm' | 'durationMinutes'
+  const fields: Array<{ key: SetMetricKey; value?: number; label: string }> = metrics.map((metric) => {
+    if (metric === 'load') return { key: 'load', value: set.load, label: `Carga do registro ${index + 1} em ${unit}` }
+    if (metric === 'reps') return { key: 'reps', value: set.reps, label: `Repetições do registro ${index + 1}` }
+    if (metric === 'distance') return { key: 'distanceKm', value: set.distanceKm, label: `Distância do registro ${index + 1} em quilômetros` }
+    return { key: 'durationMinutes', value: set.durationMinutes, label: `Tempo do registro ${index + 1} em minutos` }
+  })
+  return <span className={`metric-inputs metrics-${fields.length}`}>{fields.map((field) => <LocalizedNumberInput key={field.key} value={field.value} label={field.label} onCommit={(value) => onCommit({ [field.key]: value })} />)}</span>
+}
+
+function ExerciseNoteInput({ itemId, exerciseName, value, onCommit }: { itemId: string; exerciseName: string; value?: string; onCommit: (value: string) => void }) {
+  const [draft, setDraft] = useState(value ?? '')
+  const inputRef = useRef<HTMLTextAreaElement>(null)
+  const commitTimer = useRef<number | undefined>(undefined)
+
+  useEffect(() => {
+    if (document.activeElement !== inputRef.current) setDraft(value ?? '')
+  }, [itemId, value])
+
+  useEffect(() => () => window.clearTimeout(commitTimer.current), [])
+
+  const commit = (next: string) => {
+    window.clearTimeout(commitTimer.current)
+    onCommit(next)
+  }
+
+  return <textarea ref={inputRef} rows={1} className="note-input" aria-label={`Observação sobre ${exerciseName}`} placeholder="uma observação, se quiser…" value={draft} onChange={(event) => {
+    const next = event.target.value
+    setDraft(next)
+    window.clearTimeout(commitTimer.current)
+    commitTimer.current = window.setTimeout(() => onCommit(next), 450)
+  }} onBlur={() => commit(draft)} />
 }
 
 function LocalizedNumberInput({ value, label, onCommit }: { value?: number; label: string; onCommit: (value?: number) => void }) {
@@ -550,6 +606,7 @@ function TimelinePage({ data, refresh, setNotice }: SharedProps) {
   const [photoProgress, setPhotoProgress] = useState({ current: 0, total: 0 })
   const [filter, setFilter] = useState<'all' | 'milestones' | 'media'>('all')
   const [selectedEntryId, setSelectedEntryId] = useState<string>()
+  const [selectedMediaId, setSelectedMediaId] = useState<string>()
   const visible = data.timeline.filter((entry) => filter === 'all' || (filter === 'milestones' && entry.isMilestone))
   const media = useMemo(() => timelineMedia(data.timeline), [data.timeline])
   const selectedEntry = data.timeline.find((entry) => entry.id === selectedEntryId)
@@ -629,13 +686,14 @@ function TimelinePage({ data, refresh, setNotice }: SharedProps) {
     <div className="page timeline-page">
       <PageHeader eyebrow="só sua" title="minha linha" />
       <div className="filter-row" role="tablist" aria-label="Ver registros da linha"><button role="tab" aria-selected={filter === 'all'} className={filter === 'all' ? 'selected' : ''} onClick={() => setFilter('all')}>tudo</button><button role="tab" aria-selected={filter === 'milestones'} className={filter === 'milestones' ? 'selected' : ''} onClick={() => setFilter('milestones')}>marcos</button><button role="tab" aria-selected={filter === 'media'} className={filter === 'media' ? 'selected' : ''} onClick={() => setFilter('media')}>mídia</button></div>
-      {filter === 'media' ? <TimelineMediaGallery items={media} entries={data.timeline} onOpen={setSelectedEntryId} /> : visible.length === 0 ? <SimpleEmpty icon={<NotebookPen />} title={filter === 'milestones' ? 'Nenhum marco ainda' : 'Sua linha começa aqui'} text={filter === 'milestones' ? 'Você escolhe o que merece ficar em destaque.' : 'Use o + para guardar notas e fotos na sua história.'} /> : (
+      {filter === 'media' ? <TimelineMediaGallery items={media} entries={data.timeline} onOpen={setSelectedMediaId} /> : visible.length === 0 ? <SimpleEmpty icon={<NotebookPen />} title={filter === 'milestones' ? 'Nenhum marco ainda' : 'Sua linha começa aqui'} text={filter === 'milestones' ? 'Você escolhe o que merece ficar em destaque.' : 'Use o + para guardar notas e fotos na sua história.'} /> : (
         <div className="timeline-rail">
           {visible.map((entry) => <TimelineItem key={entry.id} entry={entry} onOpen={() => setSelectedEntryId(entry.id)} refresh={refresh} setNotice={setNotice} />)}
         </div>
       )}
       <FloatingAddButton tone="pink" label="Adicionar à linha" onClick={() => setComposer(true)} />
       <TimelineDetailDialog entry={selectedEntry} workout={selectedEntry?.sourceId ? data.workouts.find((workout) => workout.id === selectedEntry.sourceId) : undefined} loadUnit={data.profile.loadUnit} onClose={() => setSelectedEntryId(undefined)} />
+      {selectedMediaId && <TimelineMediaViewer key={selectedMediaId} items={media} entries={data.timeline} activeId={selectedMediaId} onClose={() => setSelectedMediaId(undefined)} />}
       {composer && <div className="sheet-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget && !photoBusy) setComposer(false) }}><form className="bottom-sheet composer" onSubmit={(event) => void saveEntry(event)}><div className="sheet-handle" /><header><div><h2>guardar na linha</h2><p className="composer-count">{imageDataUrls.length} de {MAX_TIMELINE_PHOTOS} fotos</p></div><button type="button" className="icon-button" aria-label="Fechar" disabled={photoBusy} onClick={() => setComposer(false)}><X /></button></header>{photoBusy && <div className="photo-processing" role="status">preparando foto {photoProgress.current} de {photoProgress.total}…</div>}{imageDataUrls.length > 0 && <div className={`composer-previews count-${imageDataUrls.length}`}>{imageDataUrls.map((source, index) => <div className="photo-ready" key={`${source.slice(-24)}-${index}`}><img className="composer-preview" src={source} alt={`Prévia da foto ${index + 1}`} onError={() => { setImageDataUrls((current) => current.filter((_, itemIndex) => itemIndex !== index)); setNotice('Uma foto não pôde ser exibida e foi removida.') }} /><button type="button" aria-label={`Remover foto ${index + 1}`} onClick={() => setImageDataUrls((current) => current.filter((_, itemIndex) => itemIndex !== index))}><X size={17} /></button></div>)}</div>}<textarea value={note} onChange={(event) => setNote(event.target.value)} placeholder="O que você quer lembrar?" aria-label="Anotação" /><div className="composer-actions"><label className={`secondary-button file-button ${imageDataUrls.length >= MAX_TIMELINE_PHOTOS ? 'disabled' : ''}`}><ImagePlus size={18} /> {imageDataUrls.length > 0 ? 'adicionar fotos' : 'escolher fotos'}<input type="file" multiple disabled={photoBusy || imageDataUrls.length >= MAX_TIMELINE_PHOTOS} accept="image/jpeg,image/png,image/webp,image/avif,image/heic,image/heif,image/heic-sequence,image/heif-sequence,.heic,.heif" onChange={(event) => void choosePhoto(event)} /></label><button className="primary-button" disabled={photoBusy || (!note.trim() && imageDataUrls.length === 0)}>guardar</button></div><p className="privacy-note"><Info size={15} /> Até 5 fotos, otimizadas e guardadas neste aparelho.</p></form></div>}
     </div>
   )
@@ -669,18 +727,72 @@ function TimelineMediaCollage({ images, text, variant = 'summary' }: { images: s
   return <div className={`timeline-collage count-${images.length} ${variant}`}>{images.map((source, index) => <TimelineImage key={`${source.slice(-24)}-${index}`} source={source} alt={text ? `Foto ${index + 1}: ${text}` : `Foto pessoal ${index + 1} sem descrição`} />)}</div>
 }
 
+function TimelineRecordMedia({ images, text }: { images: string[]; text?: string }) {
+  const [selectedIndex, setSelectedIndex] = useState(0)
+  useEffect(() => setSelectedIndex((value) => Math.min(value, images.length - 1)), [images.length])
+  const selected = images[selectedIndex] ?? images[0]
+  const selectedAlt = text ? `Foto ${selectedIndex + 1}: ${text}` : `Foto pessoal ${selectedIndex + 1} sem descrição`
+  return <section className="timeline-record-media" aria-label={`${images.length} ${images.length === 1 ? 'foto' : 'fotos'} deste registro`}>
+    <div className="timeline-featured-photo"><TimelineImage source={selected} alt={selectedAlt} /></div>
+    {images.length > 1 && <div className={`timeline-photo-strip count-${images.length}`} aria-label="Escolher foto em destaque">{images.map((source, index) => <button type="button" key={`${source.slice(-24)}-${index}`} className={selectedIndex === index ? 'selected' : ''} aria-label={`Destacar foto ${index + 1} de ${images.length}`} aria-pressed={selectedIndex === index} onClick={() => setSelectedIndex(index)}><TimelineImage source={source} alt="" /></button>)}</div>}
+  </section>
+}
+
 function TimelineImage({ source, alt }: { source: string; alt: string }) {
   const [failed, setFailed] = useState(false)
   useEffect(() => setFailed(false), [source])
   return <span className="timeline-photo-tile">{failed ? <span className="photo-unavailable"><ImagePlus size={20} /><span>Foto indisponível</span></span> : <img src={source} alt={alt} loading="lazy" onError={() => setFailed(true)} />}</span>
 }
 
-function TimelineMediaGallery({ items, entries, onOpen }: { items: ReturnType<typeof timelineMedia>; entries: TimelineEntry[]; onOpen: (entryId: string) => void }) {
+function TimelineMediaGallery({ items, entries, onOpen }: { items: ReturnType<typeof timelineMedia>; entries: TimelineEntry[]; onOpen: (mediaId: string) => void }) {
   if (items.length === 0) return <SimpleEmpty icon={<ImagePlus />} title="Nenhuma mídia ainda" text="As fotos guardadas na sua linha aparecem aqui." />
   return <section className="timeline-gallery" aria-label={`${items.length} ${items.length === 1 ? 'foto' : 'fotos'} na sua linha`}>{items.map((item) => {
     const entry = entries.find((candidate) => candidate.id === item.entryId)
-    return <button key={item.id} onClick={() => onOpen(item.entryId)} aria-label={`Abrir foto ${item.position} de ${item.totalInEntry} do registro de ${formatLongDate(item.occurredAt)}`}><TimelineImage source={item.source} alt={entry?.text ? `Foto: ${entry.text}` : 'Foto pessoal sem descrição'} /></button>
+    return <button key={item.id} onClick={() => onOpen(item.id)} aria-label={`Ampliar foto ${item.position} de ${item.totalInEntry} do registro de ${formatLongDate(item.occurredAt)}`}><TimelineImage source={item.source} alt={entry?.text ? `Foto: ${entry.text}` : 'Foto pessoal sem descrição'} /></button>
   })}</section>
+}
+
+function TimelineMediaViewer({ items, entries, activeId, onClose }: { items: ReturnType<typeof timelineMedia>; entries: TimelineEntry[]; activeId?: string; onClose: () => void }) {
+  const [index, setIndex] = useState(() => Math.max(0, items.findIndex((item) => item.id === activeId)))
+  const closeButton = useRef<HTMLButtonElement>(null)
+  const titleId = useId()
+
+  useEffect(() => {
+    if (!activeId) return
+    const previouslyFocused = document.activeElement instanceof HTMLElement ? document.activeElement : undefined
+    const previousOverflow = document.body.style.overflow
+    document.body.style.overflow = 'hidden'
+    const focusFrame = window.requestAnimationFrame(() => closeButton.current?.focus())
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') onClose()
+      if (event.key === 'ArrowLeft') setIndex((value) => Math.max(0, value - 1))
+      if (event.key === 'ArrowRight') setIndex((value) => Math.min(items.length - 1, value + 1))
+      if (event.key !== 'Tab') return
+      const dialog = closeButton.current?.closest('[role="dialog"]')
+      const focusable = Array.from(dialog?.querySelectorAll<HTMLButtonElement>('button:not(:disabled)') ?? [])
+      if (focusable.length === 0) return
+      const first = focusable[0]
+      const last = focusable.at(-1) ?? first
+      if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last.focus() }
+      else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first.focus() }
+    }
+    window.addEventListener('keydown', onKeyDown)
+    return () => {
+      window.cancelAnimationFrame(focusFrame)
+      window.removeEventListener('keydown', onKeyDown)
+      document.body.style.overflow = previousOverflow
+      previouslyFocused?.focus()
+    }
+  }, [activeId, items.length, onClose])
+
+  if (!activeId || items.length === 0) return null
+  const current = items[index] ?? items[0]
+  const entry = entries.find((candidate) => candidate.id === current.entryId)
+  return <div className="media-viewer-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose() }}><section className="media-viewer" role="dialog" aria-modal="true" aria-labelledby={titleId}>
+    <header><div><p className="eyebrow">{formatLongDate(current.occurredAt)}</p><h2 id={titleId}>foto em destaque</h2></div><button ref={closeButton} className="icon-button" aria-label="Fechar foto" onClick={onClose}><X /></button></header>
+    <div className="media-viewer-photo"><TimelineImage source={current.source} alt={entry?.text ? `Foto: ${entry.text}` : 'Foto pessoal sem descrição'} /></div>
+    <footer><button type="button" aria-label="Foto anterior" disabled={index === 0} onClick={() => setIndex((value) => Math.max(0, value - 1))}><ChevronLeft /></button><span aria-live="polite">{index + 1} de {items.length}</span><button type="button" aria-label="Próxima foto" disabled={index === items.length - 1} onClick={() => setIndex((value) => Math.min(items.length - 1, value + 1))}><ChevronRight /></button></footer>
+  </section></div>
 }
 
 function TimelineDetailDialog({ entry, workout, loadUnit, onClose }: { entry?: TimelineEntry; workout?: Workout; loadUnit: Profile['loadUnit']; onClose: () => void }) {
@@ -714,7 +826,7 @@ function TimelineDetailDialog({ entry, workout, loadUnit, onClose }: { entry?: T
   if (!entry) return null
   const images = timelineImages(entry)
   const kindLabel = entry.kind === 'workout' ? 'treino' : images.length > 0 ? `${images.length} ${images.length === 1 ? 'foto' : 'fotos'}` : 'nota'
-  return <div className="detail-dialog-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose() }}><section className="timeline-detail-dialog" role="dialog" aria-modal="true" aria-labelledby={titleId}><header><div><p className="eyebrow">{kindLabel} · {formatLongDate(entry.occurredAt)} · {formatTime(entry.occurredAt)}</p><h2 id={titleId}>{entry.title}</h2></div><button ref={closeButton} className="icon-button" aria-label="Fechar detalhes" onClick={onClose}><X /></button></header>{entry.isMilestone && <p className="milestone-label"><Star size={14} fill="currentColor" /> meu marco</p>}{entry.text && <p className="timeline-detail-text">{entry.text}</p>}{images.length > 0 && <TimelineMediaCollage images={images} text={entry.text} variant="detail" />}{workout && <div className="timeline-workout-detail"><p className="timeline-workout-summary">{workoutDurationMinutes(workout)} min · {workout.items.length} {workout.items.length === 1 ? 'atividade' : 'atividades'}{workout.feeling ? ` · ${workout.feeling}` : ''}</p>{workout.items.map((item) => <section key={item.id}><h3>{item.exerciseName}</h3><p>{item.sets.filter((set) => set.completed).map((set) => formatSetSummary(set, item.metricMode, loadUnit)).join(' · ') || 'Sem registros concluídos'}</p>{item.note && <small>{item.note}</small>}</section>)}</div>}</section></div>
+  return <div className="detail-dialog-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose() }}><section className="timeline-detail-dialog" role="dialog" aria-modal="true" aria-labelledby={titleId}><header><div><p className="eyebrow">{kindLabel} · {formatLongDate(entry.occurredAt)} · {formatTime(entry.occurredAt)}</p><h2 id={titleId}>{entry.title}</h2></div><button ref={closeButton} className="icon-button" aria-label="Fechar detalhes" onClick={onClose}><X /></button></header>{entry.isMilestone && <p className="milestone-label"><Star size={14} fill="currentColor" /> meu marco</p>}{entry.text && <p className="timeline-detail-text">{entry.text}</p>}{images.length > 0 && <TimelineRecordMedia key={entry.id} images={images} text={entry.text} />}{workout && <div className="timeline-workout-detail"><p className="timeline-workout-summary">{workoutDurationMinutes(workout)} min · {workout.items.length} {workout.items.length === 1 ? 'atividade' : 'atividades'}{workout.feeling ? ` · ${workout.feeling}` : ''}</p>{workout.items.map((item) => <section key={item.id}><h3>{item.exerciseName}</h3><p>{item.sets.filter((set) => set.completed).map((set) => formatSetSummary(set, item.metrics ?? defaultMetricsForMode(item.metricMode), loadUnit)).join(' · ') || 'Sem registros concluídos'}</p>{item.note && <small>{item.note}</small>}</section>)}</div>}</section></div>
 }
 
 function ExercisesPage({ data, refresh, setNotice, allExercises, allTemplates }: SharedProps) {
@@ -947,7 +1059,7 @@ function AppUpdateScreen({ flow, onRetry }: { flow: UpdateFlow; onRetry: () => v
 function WorkoutDetail({ data }: { data: AppSnapshot }) {
   const { id } = useParams(); const navigate = useNavigate(); const workout = data.workouts.find((item) => item.id === id)
   if (!workout) return <SimpleEmpty icon={<Dumbbell />} title="Treino não encontrado" />
-  return <div className="page detail-page"><header className="detail-top"><button className="icon-button" aria-label="Voltar" onClick={() => navigate(-1)}><ArrowLeft /></button></header><p className="eyebrow">{formatLongDate(workout.endedAt ?? workout.startedAt)}</p><h1>{workout.title}</h1><p className="lead compact">{workoutDurationMinutes(workout)} min · {workout.items.length} atividades{workout.feeling ? ` · ${workout.feeling}` : ''}</p><div className="workout-detail-list">{workout.items.map((item) => <section key={item.id}><h2>{item.exerciseName}</h2><p>{item.sets.filter((set) => set.completed).map((set) => formatSetSummary(set, item.metricMode, data.profile.loadUnit)).join('  ·  ') || 'Sem registros concluídos'}</p>{item.note && <small>{item.note}</small>}</section>)}</div></div>
+  return <div className="page detail-page"><header className="detail-top"><button className="icon-button" aria-label="Voltar" onClick={() => navigate(-1)}><ArrowLeft /></button></header><p className="eyebrow">{formatLongDate(workout.endedAt ?? workout.startedAt)}</p><h1>{workout.title}</h1><p className="lead compact">{workoutDurationMinutes(workout)} min · {workout.items.length} atividades{workout.feeling ? ` · ${workout.feeling}` : ''}</p><div className="workout-detail-list">{workout.items.map((item) => <section key={item.id}><h2>{item.exerciseName}</h2><p>{item.sets.filter((set) => set.completed).map((set) => formatSetSummary(set, item.metrics ?? defaultMetricsForMode(item.metricMode), data.profile.loadUnit)).join('  ·  ') || 'Sem registros concluídos'}</p>{item.note && <small>{item.note}</small>}</section>)}</div></div>
 }
 
 function BottomNav() {
@@ -1068,11 +1180,13 @@ function isLikelyHeic(file: File) {
   return ['image/heic', 'image/heif', 'image/heic-sequence', 'image/heif-sequence', 'image/x-heic', 'image/x-heif'].includes(file.type.toLocaleLowerCase()) || /\.(heic|heif)$/i.test(file.name)
 }
 
-function formatSetSummary(set: WorkoutSet, mode: MetricMode, unit: Profile['loadUnit']) {
-  if (mode === 'load-reps') return `${formatLocalizedNumber(set.load)} ${unit} × ${formatLocalizedNumber(set.reps)}`
-  if (mode === 'reps-only') return `${formatLocalizedNumber(set.reps)} repetições`
-  if (mode === 'distance-time') return `${formatLocalizedNumber(set.distanceKm)} km · ${formatLocalizedNumber(set.durationMinutes)} min`
-  return `${formatLocalizedNumber(set.durationMinutes)} min`
+function formatSetSummary(set: WorkoutSet, metrics: WorkoutMetric[], unit: Profile['loadUnit']) {
+  return metrics.map((metric) => {
+    if (metric === 'load') return `${formatLocalizedNumber(set.load)} ${unit}`
+    if (metric === 'reps') return `${formatLocalizedNumber(set.reps)} reps`
+    if (metric === 'distance') return `${formatLocalizedNumber(set.distanceKm)} km`
+    return `${formatLocalizedNumber(set.durationMinutes)} min`
+  }).join(' · ')
 }
 
 function normalizeWorkout(workout: Workout): Workout {
@@ -1081,7 +1195,8 @@ function normalizeWorkout(workout: Workout): Workout {
     restSeconds: workout.restSeconds ?? 90,
     items: workout.items.map((item) => {
       const known = systemExercises.find((exercise) => exercise.id === item.exerciseId)
-      return { ...item, category: item.category ?? known?.category ?? 'strength', metricMode: item.metricMode ?? known?.metricMode ?? 'load-reps' }
+      const metricMode = item.metricMode ?? known?.metricMode ?? 'load-reps'
+      return { ...item, category: item.category ?? known?.category ?? 'strength', metricMode, metrics: item.metrics ?? defaultMetricsForMode(metricMode) }
     }),
   }
 }

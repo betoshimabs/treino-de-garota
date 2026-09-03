@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { calculateBmi, isSetValid, parseLocalizedNumber } from './domain'
+import { calculateBmi, defaultMetricsForMode, isSetValid, isSetValidForMetrics, parseLocalizedNumber } from './domain'
 
 describe('entradas localizadas', () => {
   it('aceita vírgula e ponto decimal', () => {
@@ -23,6 +23,12 @@ describe('métricas orientadas à atividade', () => {
   it('exige distância e tempo no cardio por distância', () => {
     expect(isSetValid({ id: '1', distanceKm: 3.2, durationMinutes: 25, completed: false }, 'distance-time')).toBe(true)
     expect(isSetValid({ id: '2', durationMinutes: 25, completed: false }, 'distance-time')).toBe(false)
+  })
+
+  it('permite combinar métricas personalizadas sem alterar a recomendação original', () => {
+    expect(defaultMetricsForMode('load-reps')).toEqual(['load', 'reps'])
+    expect(isSetValidForMetrics({ id: '1', reps: 12, durationMinutes: 2, completed: false }, ['reps', 'duration'])).toBe(true)
+    expect(isSetValidForMetrics({ id: '2', reps: 12, completed: false }, ['reps', 'duration'])).toBe(false)
   })
 })
 
