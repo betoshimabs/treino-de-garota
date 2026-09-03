@@ -22,6 +22,7 @@ import {
   Search,
   ShieldCheck,
   SlidersHorizontal,
+  Smartphone,
   Square,
   Star,
   Trash2,
@@ -37,6 +38,7 @@ import { systemTemplates } from './data/templates'
 import { calculateBmi, defaultMetricsForMode, formatLocalizedNumber, isSetValidForMetrics, kgToLb, lbToKg, parseLocalizedNumber, workoutMetricOrder } from './domain'
 import { ExerciseVisual } from './components/ExerciseVisual'
 import { applyAppUpdate } from './pwa-update'
+import { canShowInstallNudge, consumeCapturedInstallPrompt, getInstallPlatform, getManualInstallSteps, INSTALL_SNOOZE_DURATION_MS, INSTALL_SNOOZE_KEY, subscribeToInstallPrompt, type BeforeInstallPromptEvent, type InstallPlatform } from './pwa-install'
 import { getAuthErrorMessage, useAuth } from './auth'
 import { exerciseProgress, thisMonthCount, totalCompletedSets, workoutDurationMinutes } from './stats'
 import { MAX_TIMELINE_PHOTOS, timelineImages, timelineMedia } from './timeline'
@@ -47,14 +49,22 @@ const formatDay = (value: string) => new Intl.DateTimeFormat('pt-BR', { day: '2-
 const formatLongDate = (value: string) => new Intl.DateTimeFormat('pt-BR', { weekday: 'long', day: 'numeric', month: 'long' }).format(new Date(value))
 const formatTime = (value: string) => new Intl.DateTimeFormat('pt-BR', { hour: '2-digit', minute: '2-digit' }).format(new Date(value))
 const emptySnapshot: AppSnapshot = { workouts: [], timeline: [], favorites: [], customExercises: [], customTemplates: [], profile: defaultProfile }
-const INSTALL_SNOOZE_KEY = 'tg-install-snoozed-until'
 const BRAND_ICON_URL = `${import.meta.env.BASE_URL}brabita-icon-192.png`
 const BACKUP_APP_ID = 'brabita'
 const ACCEPTED_BACKUP_APP_IDS = new Set([BACKUP_APP_ID, 'treino-de-garota'])
 
-interface BeforeInstallPromptEvent extends Event {
-  prompt: () => Promise<void>
-  userChoice: Promise<{ outcome: 'accepted' | 'dismissed' }>
+type InstallRequestResult = 'accepted' | 'dismissed' | 'installed' | 'instructions'
+
+type PwaInstallExperience = {
+  installed: boolean
+  promptAvailable: boolean
+  platform: InstallPlatform
+  requestInstall: () => Promise<InstallRequestResult>
+}
+
+function isAppRunningInstalled() {
+  const iosNavigator = navigator as Navigator & { standalone?: boolean }
+  return window.matchMedia('(display-mode: standalone)').matches || Boolean(iosNavigator.standalone)
 }
 
 function App() {
@@ -74,6 +84,8 @@ function AppContent() {
   const [installPrompt, setInstallPrompt] = useState<BeforeInstallPromptEvent>()
   const [showInstall, setShowInstall] = useState(false)
   const [showIosHelp, setShowIosHelp] = useState(false)
+  const [appInstalled, setAppInstalled] = useState(() => isAppRunningInstalled())
+  const installPlatform = getInstallPlatform(navigator.userAgent, navigator.platform, navigator.maxTouchPoints)
   const location = useLocation()
 
   const refresh = async () => {
@@ -109,26 +121,59 @@ function AppContent() {
   }, [updateFlow.phase])
 
   useEffect(() => {
-    const iosNavigator = navigator as Navigator & { standalone?: boolean }
-    const standalone = window.matchMedia('(display-mode: standalone)').matches || Boolean(iosNavigator.standalone)
-    if (standalone) return
-    const canShow = () => Date.now() >= Number(localStorage.getItem(INSTALL_SNOOZE_KEY) ?? 0)
-    const onPrompt = (event: Event) => {
-      event.preventDefault()
-      setInstallPrompt(event as BeforeInstallPromptEvent)
+    const displayMode = window.matchMedia('(display-mode: standalone)')
+    const syncInstalledState = () => setAppInstalled(isAppRunningInstalled())
+    if (isAppRunningInstalled()) return
+    const canShow = () => canShowInstallNudge(localStorage.getItem(INSTALL_SNOOZE_KEY))
+    const onPrompt = (event: BeforeInstallPromptEvent) => {
+      setInstallPrompt(event)
       if (canShow()) setShowInstall(true)
     }
-    const onInstalled = () => { setShowInstall(false); localStorage.removeItem(INSTALL_SNOOZE_KEY) }
-    window.addEventListener('beforeinstallprompt', onPrompt)
+    const onInstalled = () => {
+      setAppInstalled(true)
+      setInstallPrompt(undefined)
+      setShowInstall(false)
+      localStorage.removeItem(INSTALL_SNOOZE_KEY)
+    }
+    const unsubscribePrompt = subscribeToInstallPrompt(onPrompt)
     window.addEventListener('appinstalled', onInstalled)
-    const isIos = /iphone|ipad|ipod/i.test(navigator.userAgent)
-    const timer = isIos && canShow() ? window.setTimeout(() => setShowInstall(true), 1400) : undefined
+    displayMode.addEventListener('change', syncInstalledState)
+    const timer = installPlatform === 'ios' && canShow() ? window.setTimeout(() => setShowInstall(true), 1400) : undefined
     return () => {
-      window.removeEventListener('beforeinstallprompt', onPrompt)
+      unsubscribePrompt()
       window.removeEventListener('appinstalled', onInstalled)
+      displayMode.removeEventListener('change', syncInstalledState)
       if (timer) window.clearTimeout(timer)
     }
-  }, [])
+  }, [installPlatform])
+
+  const snoozeInstallNudge = () => {
+    localStorage.setItem(INSTALL_SNOOZE_KEY, String(Date.now() + INSTALL_SNOOZE_DURATION_MS))
+    setShowInstall(false)
+  }
+
+  const requestPwaInstall = async (): Promise<InstallRequestResult> => {
+    if (appInstalled || isAppRunningInstalled()) {
+      setAppInstalled(true)
+      setShowInstall(false)
+      return 'installed'
+    }
+    const prompt = installPrompt
+    if (!prompt) return 'instructions'
+    try {
+      await prompt.prompt()
+      const choice = await prompt.userChoice
+      consumeCapturedInstallPrompt(prompt)
+      setInstallPrompt(undefined)
+      setShowInstall(false)
+      if (choice.outcome === 'dismissed') snoozeInstallNudge()
+      return choice.outcome
+    } catch {
+      consumeCapturedInstallPrompt(prompt)
+      setInstallPrompt(undefined)
+      return 'instructions'
+    }
+  }
 
   useEffect(() => {
     if (!notice) return
@@ -157,7 +202,13 @@ function AppContent() {
     return <Onboarding profile={data.profile} onDone={async (profile) => { await saveProfile(profile); await refresh() }} />
   }
 
-  const shared = { data, refresh, setNotice, allExercises, allTemplates }
+  const installExperience: PwaInstallExperience = {
+    installed: appInstalled,
+    promptAvailable: Boolean(installPrompt),
+    platform: installPlatform,
+    requestInstall: requestPwaInstall,
+  }
+  const shared = { data, refresh, setNotice, allExercises, allTemplates, installExperience }
 
   return (
     <div className="app-shell">
@@ -176,16 +227,12 @@ function AppContent() {
       )}
       {showInstall && <aside className={`install-nudge ${showNav ? '' : 'during-workout'}`} aria-label="Instalar aplicativo">
         <img className="install-mark" src={BRAND_ICON_URL} alt="" />
-        <div><strong>levar o diário com você</strong><p>{showIosHelp ? 'No Safari, toque em Compartilhar e depois em “Adicionar à Tela de Início”.' : 'Instale para abrir rápido e usar offline.'}</p></div>
+        <div><strong>levar o diário com você</strong><p>{showIosHelp ? getManualInstallSteps(installPlatform).join(' ') : 'Instale para abrir rápido e usar offline.'}</p></div>
         {!showIosHelp && <button className="install-action" onClick={async () => {
-          if (!installPrompt) { setShowIosHelp(true); return }
-          await installPrompt.prompt()
-          const choice = await installPrompt.userChoice
-          setInstallPrompt(undefined)
-          if (choice.outcome === 'accepted') setShowInstall(false)
-          else { localStorage.setItem(INSTALL_SNOOZE_KEY, String(Date.now() + 24 * 60 * 60 * 1000)); setShowInstall(false) }
+          const result = await requestPwaInstall()
+          if (result === 'instructions') setShowIosHelp(true)
         }}>instalar</button>}
-        <button className="install-later" onClick={() => { localStorage.setItem(INSTALL_SNOOZE_KEY, String(Date.now() + 24 * 60 * 60 * 1000)); setShowInstall(false) }}>lembrar mais tarde</button>
+        <button className="install-later" onClick={snoozeInstallNudge}>lembrar mais tarde</button>
       </aside>}
       <main id="conteudo" className={showNav ? 'page-area with-nav' : 'page-area'}>
         <Routes>
@@ -212,6 +259,7 @@ type SharedProps = {
   setNotice: (message: string) => void
   allExercises: Exercise[]
   allTemplates: WorkoutTemplate[]
+  installExperience: PwaInstallExperience
 }
 
 function Onboarding({ profile, onDone }: { profile: Profile; onDone: (profile: Profile) => Promise<void> }) {
@@ -922,13 +970,15 @@ function EvolutionPage({ data, allExercises }: { data: AppSnapshot; allExercises
   return <div className="page evolution-page"><PageHeader eyebrow="sem pressa" title="evolução" /><section className="month-summary"><p>neste mês</p><strong>{thisMonthCount(data.workouts)}</strong><span>treinos que você guardou</span><i /></section><div className="stat-strip"><div><strong>{completed.length}</strong><span>treinos no total</span></div><div><strong>{totalCompletedSets(data.workouts)}</strong><span>registros concluídos</span></div></div><section className="progress-section"><div className="section-heading"><div><p className="eyebrow">carga por sessão</p><h2>um exercício</h2></div></div>{usedExercises.length === 0 ? <div className="empty-gentle"><BarChart3 size={22} /><p>Registre alguns treinos para enxergar mudanças por aqui.</p></div> : <><label className="field compact"><span>exercício</span><select value={selected} onChange={(event) => setSelected(event.target.value)}>{usedExercises.map((id) => <option key={id} value={id}>{allExercises.find((exercise) => exercise.id === id)?.name ?? id}</option>)}</select></label>{points.length === 0 ? <p className="chart-summary">Ainda não há cargas concluídas para este exercício.</p> : <><div className="mini-chart" role="img" aria-label={`Evolução da carga em ${selectedName}: ${points.map((point) => `${point.value} ${data.profile.loadUnit} em ${formatDay(point.date)}`).join(', ')}`}><span className="chart-max">{maxValue} {data.profile.loadUnit}</span><div className="chart-bars">{points.slice(-8).map((point) => <div key={point.date} style={{ height: `${Math.max(12, point.value / maxValue * 100)}%` }}><span>{point.value}</span></div>)}</div></div><p className="chart-summary">Maior carga registrada em {selectedName}: <strong>{maxValue} {data.profile.loadUnit}</strong>.</p></>}</>}</section><p className="little-note"><span>✦</span> evolução também é voltar, ajustar e continuar</p></div>
 }
 
-function ProfilePage({ data, refresh, setNotice }: SharedProps) {
+function ProfilePage({ data, refresh, setNotice, installExperience }: SharedProps) {
   const { user, signOutAccount, deleteAccount } = useAuth()
   const [profile, setLocalProfile] = useState(data.profile)
   const [pendingBackup, setPendingBackup] = useState<{ data: AppSnapshot }>()
   const [eraseConfirm, setEraseConfirm] = useState(false)
   const [accountDeleteConfirm, setAccountDeleteConfirm] = useState(false)
   const [dataActionBusy, setDataActionBusy] = useState(false)
+  const [installActionBusy, setInstallActionBusy] = useState(false)
+  const [installHelpOpen, setInstallHelpOpen] = useState(false)
   const fileRef = useRef<HTMLInputElement>(null)
   const persistProfile = async (next: Profile) => { setLocalProfile(next); await saveProfile(next); await refresh() }
   const displayWeight = profile.bodyWeightKg === undefined ? undefined : profile.loadUnit === 'kg' ? profile.bodyWeightKg : kgToLb(profile.bodyWeightKg)
@@ -984,6 +1034,20 @@ function ProfilePage({ data, refresh, setNotice }: SharedProps) {
     await refresh()
     setNotice('Dados apagados deste aparelho.')
   }
+  const requestInstall = async () => {
+    setInstallActionBusy(true)
+    const result = await installExperience.requestInstall()
+    setInstallActionBusy(false)
+    if (result === 'instructions') {
+      setInstallHelpOpen(true)
+      return
+    }
+    setInstallHelpOpen(false)
+    if (result === 'accepted') setNotice('Instalação autorizada. O ícone deve aparecer em instantes.')
+    if (result === 'dismissed') setNotice('Instalação cancelada. Você pode tentar novamente por aqui.')
+    if (result === 'installed') setNotice('A Brabita já está instalada neste aparelho.')
+  }
+  const installSteps = getManualInstallSteps(installExperience.platform)
   return <>
     <div className="page profile-page">
       <PageHeader eyebrow="seu espaço" title="eu" />
@@ -1007,6 +1071,12 @@ function ProfilePage({ data, refresh, setNotice }: SharedProps) {
           <label className="field"><span>gravidez</span><select value={profile.pregnancyStatus ?? ''} onChange={(event) => void persistProfile({ ...profile, pregnancyStatus: event.target.value ? event.target.value as Profile['pregnancyStatus'] : undefined })}><option value="">Prefiro não informar</option><option value="pregnant">Estou grávida</option><option value="not-pregnant">Não estou grávida</option></select></label>
         </div>
       </details>
+      <section className="device-section">
+        <p className="eyebrow">neste dispositivo</p><h2>abrir como aplicativo</h2>
+        <p>Instalada, a Brabita ganha ícone próprio e continua pronta para os treinos já carregados mesmo sem conexão.</p>
+        {installExperience.installed ? <div className="install-device-row installed"><span className="install-device-icon"><Check size={19} /></span><span><strong>Brabita instalada</strong><small>você já está usando a versão em aplicativo</small></span></div> : <button className="data-action" disabled={installActionBusy} onClick={() => void requestInstall()}><Smartphone /><span><strong>{installExperience.promptAvailable ? 'instalar Brabita' : 'como instalar a Brabita'}</strong><small>{installExperience.promptAvailable ? 'abre a confirmação segura do navegador' : 'opção manual para este navegador'}</small></span><ChevronRight /></button>}
+        {!installExperience.installed && installHelpOpen && <div className="manual-install-help" role="status"><strong>instalação pelo navegador</strong><ol>{installSteps.map((step) => <li key={step}>{step}</li>)}</ol><p>O navegador sempre pede sua confirmação; nenhum site consegue instalar um aplicativo sem ela.</p><button type="button" onClick={() => setInstallHelpOpen(false)}>entendi</button></div>}
+      </section>
       <section className="account-section">
         <p className="eyebrow">sua conta</p><h2>acesso ao diário</h2>
         <div className="account-summary"><ShieldCheck size={21} /><span><strong>{user?.displayName || profile.nickname || 'Sua conta Brabita'}</strong><small>{user?.email ?? 'Conta conectada'} · e-mail confirmado</small></span></div>

@@ -5,8 +5,10 @@ import '@fontsource-variable/nunito-sans'
 import App from './App'
 import { AuthGate, AuthProvider } from './auth'
 import { registerAppServiceWorker } from './pwa-update'
+import { startInstallPromptCapture } from './pwa-install'
 import './styles.css'
 
+startInstallPromptCapture()
 registerAppServiceWorker()
 
 ReactDOM.createRoot(document.getElementById('root')!).render(

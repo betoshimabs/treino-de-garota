@@ -479,8 +479,8 @@ h2 { font-size: 1.35rem; line-height: 1.05; }
 .avatar-soft { width: 64px; height: 64px; border-radius: 24px 20px 26px 21px; background: var(--pink-paper); display: grid; place-items: center; }
 .profile-intro label span { display: block; color: var(--muted); font-size: .73rem; margin-bottom: 4px; }
 .profile-intro input { border: 0; border-bottom: 1px solid var(--line); background: transparent; width: 100%; min-height: 38px; font-family: 'Gabarito Variable'; font-size: 1.2rem; font-weight: 650; }
-.settings-section, .account-section, .data-section { padding-top: 25px; border-top: 1px solid var(--line); margin-top: 20px; }
-.settings-section > h2, .account-section > h2, .data-section > h2 { font-size: 1.45rem; }
+.settings-section, .device-section, .account-section, .data-section { padding-top: 25px; border-top: 1px solid var(--line); margin-top: 20px; }
+.settings-section > h2, .device-section > h2, .account-section > h2, .data-section > h2 { font-size: 1.45rem; }
 .account-summary { min-height: 72px; display: grid; grid-template-columns: 34px 1fr; align-items: center; gap: 8px; border-top: 1px solid var(--line); }
 .account-summary svg { color: #286b5c; }
 .account-summary strong, .account-summary small { display: block; }
@@ -512,6 +512,17 @@ h2 { font-size: 1.35rem; line-height: 1.05; }
 .data-action { width: 100%; min-height: 70px; padding: 8px 0; display: grid; grid-template-columns: 37px 1fr auto; align-items: center; gap: 8px; text-align: left; background: transparent; border-top: 1px solid var(--line); }
 .data-action strong, .data-action small { display: block; }
 .data-action small { color: var(--muted); margin-top: 3px; font-size: .7rem; }
+.data-action:disabled { opacity: .55; cursor: wait; }
+.device-section > p:not(.eyebrow) { color: var(--muted); font-size: .82rem; line-height: 1.45; }
+.install-device-row { min-height: 70px; display: grid; grid-template-columns: 37px 1fr; align-items: center; gap: 8px; border-top: 1px solid var(--line); }
+.install-device-row strong, .install-device-row small { display: block; }
+.install-device-row small { color: var(--muted); margin-top: 3px; font-size: .7rem; }
+.install-device-icon { width: 28px; height: 28px; display: grid; place-items: center; border-radius: 10px 8px 11px 9px; background: rgba(168, 218, 220, .65); color: #286b5c; }
+.manual-install-help { margin: 4px 0 12px; padding: 15px; border-radius: 16px 14px 18px 15px; background: rgba(244, 213, 167, .36); }
+.manual-install-help > strong { font-family: 'Gabarito Variable'; font-size: .94rem; }
+.manual-install-help ol { margin: 10px 0; padding-left: 21px; color: #514d47; font-size: .78rem; line-height: 1.55; }
+.manual-install-help p { margin: 0; color: var(--muted); font-size: .7rem; line-height: 1.4; }
+.manual-install-help button { min-height: 44px; margin-top: 7px; padding: 0; background: transparent; font-weight: 800; text-decoration: underline; text-underline-offset: 3px; }
 .danger-action { min-height: 46px; background: transparent; color: #98354f; display: flex; align-items: center; gap: 8px; margin-top: 12px; }
 .app-footer { text-align: center; display: grid; justify-items: center; gap: 10px; margin: 55px 0 10px; color: var(--muted); font-size: .75rem; }
 .app-footer p { margin: 0; }
