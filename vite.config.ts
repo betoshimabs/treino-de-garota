@@ -47,8 +47,8 @@ export default defineConfig({
         'brabita-icon-512-maskable.png',
       ],
       manifest: {
-        name: 'BRABITA',
-        short_name: 'BRABITA',
+        name: 'Brabita',
+        short_name: 'Brabita',
         description: 'Seu treino, do jeito que aconteceu.',
         id: '/treino-de-garota/',
         theme_color: '#f6f1e3',

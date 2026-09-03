@@ -145,7 +145,7 @@ function AppContent() {
   }
 
   if (loading) {
-    return <main className="loading-screen"><img className="brand-logo" src={BRAND_ICON_URL} alt="" /><strong className="brand-name">BRABITA</strong><p>Abrindo seu diário…</p></main>
+    return <main className="loading-screen"><img className="brand-logo" src={BRAND_ICON_URL} alt="" /><strong className="brand-name">Brabita</strong><p>Abrindo seu diário…</p></main>
   }
 
   if (!data.profile.onboarded) {
@@ -214,7 +214,7 @@ function Onboarding({ profile, onDone }: { profile: Profile; onDone: (profile: P
   const [busy, setBusy] = useState(false)
   return (
     <main className="onboarding">
-      <div className="onboarding-mark"><img className="brand-logo" src={BRAND_ICON_URL} alt="" /><span className="brand-name">BRABITA</span></div>
+      <div className="onboarding-mark"><img className="brand-logo" src={BRAND_ICON_URL} alt="" /><span className="brand-name">Brabita</span></div>
       <p className="eyebrow">seu diário de treino</p>
       <h1>Do jeito que<br />aconteceu.</h1>
       <p className="lead">Registre seu treino e acompanhe sua história, sem cobrança.</p>
@@ -819,7 +819,7 @@ function ProfilePage({ data, refresh, setNotice }: SharedProps) {
         <input ref={fileRef} hidden type="file" accept="application/json" onChange={(event) => void importData(event)} />
         <button className="danger-action" onClick={() => setEraseConfirm(true)}><Trash2 size={18} /> apagar todos os dados</button>
       </section>
-      <footer className="app-footer"><img className="brand-logo small" src={BRAND_ICON_URL} alt="" /><p><strong className="brand-name">BRABITA</strong> · versão {CURRENT_RELEASE.version}</p></footer>
+      <footer className="app-footer"><img className="brand-logo small" src={BRAND_ICON_URL} alt="" /><p><strong className="brand-name">Brabita</strong> · versão {CURRENT_RELEASE.version}</p></footer>
     </div>
     <ConfirmDialog open={Boolean(pendingBackup)} title="restaurar este backup?" confirmLabel="restaurar backup" onClose={() => setPendingBackup(undefined)} onConfirm={() => void restoreBackup()} busy={dataActionBusy}><p>Os dados atuais deste aparelho serão substituídos pelo conteúdo do arquivo.</p></ConfirmDialog>
     <ConfirmDialog open={eraseConfirm} title="apagar todos os dados?" confirmLabel="apagar tudo" tone="danger" onClose={() => setEraseConfirm(false)} onConfirm={() => void erase()} busy={dataActionBusy}><p>Treinos, fotos, notas, modelos e preferências serão removidos deste aparelho. Esta ação não pode ser desfeita.</p></ConfirmDialog>
