@@ -86,8 +86,22 @@ export default defineConfig({
         cleanupOutdatedCaches: true,
         skipWaiting: true,
         clientsClaim: true,
-        globPatterns: ['**/*.{js,css,html,svg,woff2,webp}'],
-        maximumFileSizeToCacheInBytes: 3_100_000
+        globPatterns: ['**/*.{js,css,html,svg,woff2}'],
+        maximumFileSizeToCacheInBytes: 3_100_000,
+        runtimeCaching: [
+          {
+            urlPattern: /\/exercise-media\/.*\.webp$/,
+            handler: 'CacheFirst',
+            options: {
+              cacheName: 'brabita-exercise-media-v1',
+              cacheableResponse: { statuses: [0, 200] },
+              expiration: {
+                maxEntries: 74,
+                maxAgeSeconds: 60 * 60 * 24 * 30,
+              },
+            },
+          },
+        ],
       }
     })
   ],

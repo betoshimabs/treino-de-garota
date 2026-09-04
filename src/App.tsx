@@ -970,7 +970,7 @@ function ExerciseDetail({ allExercises, data, refresh }: { allExercises: Exercis
       <h1>{exercise.name}</h1>
       <div className={`detail-illustration${exercise.media ? ' has-media' : ''}`}>
         <ExerciseArtwork exercise={exercise} />
-        <small>{exercise.media ? 'início e posição baixa' : 'movimento resumido'}</small>
+        <small>{exercise.media ? 'início e execução' : 'movimento resumido'}</small>
       </div>
       {exercise.curation && (
         <section className="exercise-facts" aria-labelledby="exercise-facts-title">
