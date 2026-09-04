@@ -15,3 +15,22 @@
 *.local
 .env*
 !.env.example
+
+# Credentials, certificates and administrative SDK files
+/credentials/
+/secrets/
+*.pem
+*.key
+*.p12
+*.pfx
+*.jks
+*.keystore
+*service-account*.json
+*firebase-adminsdk*.json
+
+# Local databases, dumps and recoverable backups
+*.db
+*.sqlite
+*.sqlite3
+*.dump
+*.bak
