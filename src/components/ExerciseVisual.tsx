@@ -1,4 +1,6 @@
-import type { ExerciseVisual as VisualName } from '../types'
+import { Pause, Play } from 'lucide-react'
+import { useEffect, useState } from 'react'
+import type { Exercise, ExerciseMedia, ExerciseVisual as VisualName } from '../types'
 
 type Props = { visual: VisualName; label: string; compact?: boolean }
 
@@ -24,4 +26,54 @@ export function ExerciseVisual({ visual, label, compact = false }: Props) {
       </svg>
     </div>
   )
+}
+
+function prefersReducedMotion() {
+  return typeof window !== 'undefined' && window.matchMedia('(prefers-reduced-motion: reduce)').matches
+}
+
+function ExerciseMotion({ media }: { media: ExerciseMedia }) {
+  const [reduceMotion, setReduceMotion] = useState(prefersReducedMotion)
+  const [playing, setPlaying] = useState(() => !prefersReducedMotion())
+
+  useEffect(() => {
+    const query = window.matchMedia('(prefers-reduced-motion: reduce)')
+    const onChange = () => {
+      setReduceMotion(query.matches)
+      if (query.matches) setPlaying(false)
+    }
+    query.addEventListener('change', onChange)
+    return () => query.removeEventListener('change', onChange)
+  }, [])
+
+  return (
+    <div className="exercise-motion">
+      <img
+        src={playing ? media.motionSrc : media.posterSrc}
+        alt={media.alt}
+        width="768"
+        height="512"
+        loading="eager"
+        decoding="async"
+      />
+      <button type="button" className="exercise-motion-toggle" aria-pressed={playing} onClick={() => setPlaying((current) => !current)}>
+        {playing ? <Pause size={16} /> : <Play size={16} />}
+        <span>{playing ? 'parar movimento' : reduceMotion ? 'ver movimento mesmo assim' : 'ver movimento'}</span>
+      </button>
+    </div>
+  )
+}
+
+export function ExerciseArtwork({ exercise, compact = false }: { exercise: Exercise; compact?: boolean }) {
+  if (!exercise.media) return <ExerciseVisual visual={exercise.visual} label={exercise.name} compact={compact} />
+
+  if (compact) {
+    return (
+      <div className="exercise-visual exercise-media compact" aria-hidden="true">
+        <img src={exercise.media.posterSrc} alt="" width="768" height="512" loading="lazy" decoding="async" />
+      </div>
+    )
+  }
+
+  return <ExerciseMotion media={exercise.media} />
 }

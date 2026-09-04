@@ -39,7 +39,7 @@ import { exerciseGroups, exercises as systemExercises } from './data/exercises'
 import { systemTemplates } from './data/templates'
 import { avatarCropRect, avatarPresets, constrainAvatarCrop, profileAvatarSource, type AvatarCrop, type AvatarImageSize } from './avatar'
 import { calculateBmi, defaultMetricsForMode, formatLocalizedNumber, isSetValidForMetrics, kgToLb, lbToKg, parseLocalizedNumber, workoutMetricOrder } from './domain'
-import { ExerciseVisual } from './components/ExerciseVisual'
+import { ExerciseArtwork } from './components/ExerciseVisual'
 import { applyAppUpdate } from './pwa-update'
 import { canShowInstallNudge, consumeCapturedInstallPrompt, getInstallPlatform, getManualInstallSteps, INSTALL_SNOOZE_DURATION_MS, INSTALL_SNOOZE_KEY, subscribeToInstallPrompt, type BeforeInstallPromptEvent, type InstallPlatform } from './pwa-install'
 import { getAuthErrorMessage, useAuth } from './auth'
@@ -565,7 +565,7 @@ function WorkoutPage({ data, refresh, setNotice, allExercises, allTemplates }: S
         <button className="primary-button wide" onClick={() => void askToFinish()}><Check size={19} /> finalizar treino</button>
       </section>
 
-      {pickerOpen && <div className="sheet-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) closePicker() }}><section className="bottom-sheet exercise-picker-sheet" role="dialog" aria-modal="true" aria-labelledby="picker-title"><div className="sheet-handle" /><header><h2 id="picker-title">adicionar ao treino</h2><button className="icon-button" aria-label="Fechar" onClick={closePicker}><X /></button></header><div className="picker-tabs" role="tablist" aria-label="O que adicionar"><button role="tab" aria-selected={pickerMode === 'exercise'} className={pickerMode === 'exercise' ? 'selected' : ''} onClick={() => { setPickerMode('exercise'); setQuery('') }}>exercício</button><button role="tab" aria-selected={pickerMode === 'template'} className={pickerMode === 'template' ? 'selected' : ''} onClick={() => { setPickerMode('template'); setQuery('') }}>modelo</button></div><label className="search-field"><Search size={19} /><input placeholder={pickerMode === 'exercise' ? (section === 'strength' ? 'buscar exercício' : 'buscar cardio ou atividade') : 'buscar modelo'} value={query} onChange={(event) => setQuery(event.target.value)} /></label>{pickerMode === 'exercise' ? <div className="picker-list" tabIndex={-1}>{filtered.map((exercise) => <button key={exercise.id} onClick={() => void addExercise(exercise)}><ExerciseVisual visual={exercise.visual} label={exercise.name} compact /><span><strong>{exercise.name}</strong><small>{exercise.group} · {exercise.equipment}</small></span><Plus size={19} /></button>)}</div> : <div className="picker-list picker-template-list" tabIndex={-1}>{filteredTemplates.map((template) => <button key={template.id} onClick={() => void addTemplate(template)}><span className="template-picker-mark" /><span><strong>{template.name}</strong><small>{template.note}</small><em>{template.exerciseIds.slice(0, 3).map((id) => allExercises.find((exercise) => exercise.id === id)?.name).filter(Boolean).join(' · ')}</em></span><Plus size={19} /></button>)}</div>}</section></div>}
+      {pickerOpen && <div className="sheet-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) closePicker() }}><section className="bottom-sheet exercise-picker-sheet" role="dialog" aria-modal="true" aria-labelledby="picker-title"><div className="sheet-handle" /><header><h2 id="picker-title">adicionar ao treino</h2><button className="icon-button" aria-label="Fechar" onClick={closePicker}><X /></button></header><div className="picker-tabs" role="tablist" aria-label="O que adicionar"><button role="tab" aria-selected={pickerMode === 'exercise'} className={pickerMode === 'exercise' ? 'selected' : ''} onClick={() => { setPickerMode('exercise'); setQuery('') }}>exercício</button><button role="tab" aria-selected={pickerMode === 'template'} className={pickerMode === 'template' ? 'selected' : ''} onClick={() => { setPickerMode('template'); setQuery('') }}>modelo</button></div><label className="search-field"><Search size={19} /><input placeholder={pickerMode === 'exercise' ? (section === 'strength' ? 'buscar exercício' : 'buscar cardio ou atividade') : 'buscar modelo'} value={query} onChange={(event) => setQuery(event.target.value)} /></label>{pickerMode === 'exercise' ? <div className="picker-list" tabIndex={-1}>{filtered.map((exercise) => <button key={exercise.id} onClick={() => void addExercise(exercise)}><ExerciseArtwork exercise={exercise} compact /><span><strong>{exercise.name}</strong><small>{exercise.group} · {exercise.equipment}</small></span><Plus size={19} /></button>)}</div> : <div className="picker-list picker-template-list" tabIndex={-1}>{filteredTemplates.map((template) => <button key={template.id} onClick={() => void addTemplate(template)}><span className="template-picker-mark" /><span><strong>{template.name}</strong><small>{template.note}</small><em>{template.exerciseIds.slice(0, 3).map((id) => allExercises.find((exercise) => exercise.id === id)?.name).filter(Boolean).join(' · ')}</em></span><Plus size={19} /></button>)}</div>}</section></div>}
 
       <ConfirmDialog open={finishConfirm} title="guardar este treino?" confirmLabel="guardar treino" onClose={() => setFinishConfirm(false)} onConfirm={() => void finish()} busy={actionBusy}>
         <p>Confira o que vai entrar na sua linha.</p>
@@ -906,7 +906,7 @@ function ExercisesPage({ data, refresh, setNotice, allExercises, allTemplates }:
         <label className="search-field prominent"><Search size={19} /><input placeholder="buscar pelo nome" value={query} onChange={(event) => setQuery(event.target.value)} /></label>
         <div className="filter-row scrollable">{exerciseGroups.map((value) => <button key={value} className={group === value ? 'selected' : ''} onClick={() => setGroup(value)}>{value.toLocaleLowerCase()}</button>)}</div>
         <p className="result-count">{filtered.length} {filtered.length === 1 ? 'exercício' : 'exercícios'}</p>
-        <div className="exercise-list">{filtered.map((exercise) => <div className="exercise-list-row" key={exercise.id}><NavLink to={`/exercicios/${exercise.id}`}><ExerciseVisual visual={exercise.visual} label={exercise.name} compact /><span><strong>{exercise.name}</strong><small>{exercise.group} · {exercise.equipment}{exercise.origin === 'custom' ? ' · pessoal' : ''}</small></span></NavLink><button className="icon-button small" aria-label={data.favorites.includes(exercise.id) ? `Desfavoritar ${exercise.name}` : `Favoritar ${exercise.name}`} onClick={() => void toggleFavorite(exercise.id)}><Heart size={19} fill={data.favorites.includes(exercise.id) ? 'currentColor' : 'none'} /></button></div>)}</div>
+        <div className="exercise-list">{filtered.map((exercise) => <div className="exercise-list-row" key={exercise.id}><NavLink to={`/exercicios/${exercise.id}`}><ExerciseArtwork exercise={exercise} compact /><span><strong>{exercise.name}</strong><small>{exercise.group} · {exercise.equipment}{exercise.origin === 'custom' ? ' · pessoal' : ''}</small></span></NavLink><button className="icon-button small" aria-label={data.favorites.includes(exercise.id) ? `Desfavoritar ${exercise.name}` : `Favoritar ${exercise.name}`} onClick={() => void toggleFavorite(exercise.id)}><Heart size={19} fill={data.favorites.includes(exercise.id) ? 'currentColor' : 'none'} /></button></div>)}</div>
       </> : <div className="template-library"><p className="library-note">Modelos apenas preparam o treino. Você pode trocar ou remover qualquer exercício.</p>{allTemplates.map((template) => <article className="template-row" key={template.id}><span className="template-thread" /><div><p>{template.origin === 'custom' ? 'modelo pessoal' : 'modelo do app'}</p><h2>{template.name}</h2><small>{template.note}</small><div className="template-exercises">{template.exerciseIds.slice(0, 4).map((id) => <span key={id}>{allExercises.find((exercise) => exercise.id === id)?.name ?? 'Exercício removido'}</span>)}{template.exerciseIds.length > 4 && <span>+{template.exerciseIds.length - 4}</span>}</div></div></article>)}</div>}
       <FloatingAddButton tone="blue" label={librarySection === 'exercises' ? 'Criar exercício pessoal' : 'Criar modelo de treino'} onClick={() => librarySection === 'exercises' ? setCreating(true) : setCreatingTemplate(true)} />
       {creating && <CustomExerciseSheet onClose={() => setCreating(false)} onSaved={async () => { await refresh(); setCreating(false); setNotice('Exercício pessoal criado.') }} />}
@@ -951,7 +951,7 @@ function TemplateSheet({ exercises, onClose, onSaved }: { exercises: Exercise[];
     <label className="field"><span>nome do modelo</span><input value={name} onChange={(event) => setName(event.target.value)} placeholder="ex.: pernas de terça" /></label>
     <label className="search-field"><Search size={18} /><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="buscar para adicionar" /></label>
     <p className="selection-count">{selected.length} selecionado{selected.length === 1 ? '' : 's'}</p>
-    <div className="template-pick-list">{available.map((exercise) => <label key={exercise.id}><input type="checkbox" checked={selected.includes(exercise.id)} onChange={() => toggle(exercise.id)} /><ExerciseVisual visual={exercise.visual} label={exercise.name} compact /><span>{exercise.name}</span><Check size={17} /></label>)}</div>
+    <div className="template-pick-list">{available.map((exercise) => <label key={exercise.id}><input type="checkbox" checked={selected.includes(exercise.id)} onChange={() => toggle(exercise.id)} /><ExerciseArtwork exercise={exercise} compact /><span>{exercise.name}</span><Check size={17} /></label>)}</div>
     <button className="primary-button wide" disabled={!name.trim() || selected.length === 0}>guardar modelo</button>
   </form></div>
 }
@@ -960,7 +960,41 @@ function ExerciseDetail({ allExercises, data, refresh }: { allExercises: Exercis
   const { id } = useParams(); const navigate = useNavigate(); const exercise = allExercises.find((item) => item.id === id)
   if (!exercise) return <SimpleEmpty icon={<BookOpen />} title="Exercício não encontrado" />
   const favorite = data.favorites.includes(exercise.id)
-  return <div className="page detail-page"><header className="detail-top"><button className="icon-button" aria-label="Voltar" onClick={() => navigate(-1)}><ArrowLeft /></button><button className="icon-button soft" aria-label={favorite ? 'Desfavoritar' : 'Favoritar'} onClick={async () => { if (favorite) await db.favorites.delete(exercise.id); else await db.favorites.put({ exerciseId: exercise.id }); await refresh() }}><Heart fill={favorite ? 'currentColor' : 'none'} /></button></header><p className="eyebrow">{exercise.group} · {exercise.equipment}</p><h1>{exercise.name}</h1><div className="detail-illustration"><ExerciseVisual visual={exercise.visual} label={exercise.name} /><small>movimento resumido</small></div><section><p className="eyebrow">um passo de cada vez</p><ol className="instruction-list">{exercise.instructions.map((instruction, index) => <li key={instruction}><span>{index + 1}</span><p>{instruction}</p></li>)}</ol></section><aside className="care-note"><Info size={18} /><p>A ilustração ajuda a reconhecer o movimento, mas não demonstra todos os ajustes. Estas dicas não substituem orientação profissional.</p></aside></div>
+  return (
+    <div className="page detail-page">
+      <header className="detail-top">
+        <button className="icon-button" aria-label="Voltar" onClick={() => navigate(-1)}><ArrowLeft /></button>
+        <button className="icon-button soft" aria-label={favorite ? 'Desfavoritar' : 'Favoritar'} onClick={async () => { if (favorite) await db.favorites.delete(exercise.id); else await db.favorites.put({ exerciseId: exercise.id }); await refresh() }}><Heart fill={favorite ? 'currentColor' : 'none'} /></button>
+      </header>
+      <p className="eyebrow">{exercise.group} · {exercise.equipment}</p>
+      <h1>{exercise.name}</h1>
+      <div className={`detail-illustration${exercise.media ? ' has-media' : ''}`}>
+        <ExerciseArtwork exercise={exercise} />
+        <small>{exercise.media ? 'início e posição baixa' : 'movimento resumido'}</small>
+      </div>
+      {exercise.curation && (
+        <section className="exercise-facts" aria-labelledby="exercise-facts-title">
+          <div className="exercise-facts-heading">
+            <div><p className="eyebrow">um olhar rápido</p><h2 id="exercise-facts-title">sobre o exercício</h2></div>
+            {exercise.curation.reviewStatus === 'em-revisao' && <small>conteúdo em revisão</small>}
+          </div>
+          <dl>
+            <div><dt>alvo principal</dt><dd>{exercise.curation.primaryMuscles.join(', ')}</dd></div>
+            <div><dt>também trabalha</dt><dd>{exercise.curation.secondaryMuscles.join(', ')}</dd></div>
+            <div><dt>padrão</dt><dd>{exercise.curation.movementPattern}</dd></div>
+            {exercise.curation.suggestedRepRange && <div><dt>faixa de referência</dt><dd>{exercise.curation.suggestedRepRange.minimum}–{exercise.curation.suggestedRepRange.maximum} repetições</dd></div>}
+            {exercise.curation.stimulusToFatigue && <div><dt>estímulo × fadiga</dt><dd>{exercise.curation.stimulusToFatigue}</dd></div>}
+          </dl>
+        </section>
+      )}
+      <section>
+        <p className="eyebrow">um passo de cada vez</p>
+        <ol className="instruction-list">{exercise.instructions.map((instruction, index) => <li key={instruction}><span>{index + 1}</span><p>{instruction}</p></li>)}</ol>
+      </section>
+      <aside className="care-note"><Info size={18} /><p>A demonstração ajuda a reconhecer o movimento, mas não mostra todos os ajustes. Use como referência geral; ela não substitui orientação profissional.</p></aside>
+      {exercise.curation && <p className="exercise-attribution">Dados adaptados de <a href={exercise.curation.source.url} target="_blank" rel="noreferrer">{exercise.curation.source.name}</a> · {exercise.curation.source.license}</p>}
+    </div>
+  )
 }
 
 function EvolutionPage({ data, allExercises }: { data: AppSnapshot; allExercises: Exercise[] }) {

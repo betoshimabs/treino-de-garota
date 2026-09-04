@@ -8,6 +8,27 @@ export type ExerciseVisual = 'squat' | 'press' | 'hinge' | 'bridge' | 'lunge' | 
 export type AvatarPresetId = 'flex' | 'bottle' | 'lift' | 'run'
 export type ProfileAvatar = { type: 'preset'; presetId: AvatarPresetId } | { type: 'custom'; dataUrl: string }
 
+export interface ExerciseMedia {
+  posterSrc: string
+  motionSrc: string
+  alt: string
+}
+
+export interface ExerciseCuration {
+  primaryMuscles: string[]
+  secondaryMuscles: string[]
+  movementPattern: string
+  stimulusToFatigue?: 'baixo' | 'moderado' | 'alto'
+  suggestedRepRange?: { minimum: number; maximum: number }
+  reviewStatus: 'em-revisao' | 'revisado'
+  source: {
+    name: string
+    recordId: string
+    url: string
+    license: string
+  }
+}
+
 export interface Exercise {
   id: string
   name: string
@@ -19,6 +40,8 @@ export interface Exercise {
   category: ActivityCategory
   metricMode: MetricMode
   visual: ExerciseVisual
+  media?: ExerciseMedia
+  curation?: ExerciseCuration
 }
 
 export interface WorkoutSet {

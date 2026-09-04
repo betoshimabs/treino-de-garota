@@ -7,7 +7,7 @@ const makeExercise = (
   group: string,
   equipment: string,
   instructions: string[],
-  options: Partial<Pick<Exercise, 'category' | 'metricMode' | 'visual'>> = {},
+  options: Partial<Pick<Exercise, 'category' | 'metricMode' | 'visual' | 'media' | 'curation'>> = {},
 ): Exercise => ({
   id,
   name,
@@ -19,7 +19,11 @@ const makeExercise = (
   category: options.category ?? 'strength',
   metricMode: options.metricMode ?? 'load-reps',
   visual: options.visual ?? visualFor(id),
+  media: options.media,
+  curation: options.curation,
 })
+
+const exerciseMediaUrl = (path: string) => `${import.meta.env.BASE_URL}exercise-media/${path}`
 
 function visualFor(id: string): Exercise['visual'] {
   if (/agachamento|leg-press|extensora|flexora|abdutora|panturrilha/.test(id)) return 'squat'
@@ -35,7 +39,27 @@ function visualFor(id: string): Exercise['visual'] {
 }
 
 export const exercises: Exercise[] = [
-  makeExercise('agachamento-livre', 'Agachamento livre', ['agachamento', 'squat'], 'Pernas', 'Barra', ['Apoie a barra com conforto.', 'Desça mantendo os pés firmes.', 'Suba sem perder o alinhamento dos joelhos.']),
+  makeExercise('agachamento-livre', 'Agachamento livre', ['agachamento', 'squat', 'barbell back squat'], 'Pernas', 'Barra', ['Prepare o tronco e apoie a barra na parte alta das costas.', 'Desça entre os quadris mantendo os pés inteiros apoiados.', 'Suba mantendo os joelhos na mesma direção dos pés.'], {
+    media: {
+      posterSrc: exerciseMediaUrl('agachamento-livre/poster.webp'),
+      motionSrc: exerciseMediaUrl('agachamento-livre/movimento.webp'),
+      alt: 'A personagem demonstra o agachamento com barra, alternando entre a posição em pé e a posição baixa.',
+    },
+    curation: {
+      primaryMuscles: ['Quadríceps'],
+      secondaryMuscles: ['Glúteos', 'Posteriores de coxa', 'Lombar'],
+      movementPattern: 'Agachamento',
+      stimulusToFatigue: 'moderado',
+      suggestedRepRange: { minimum: 6, maximum: 10 },
+      reviewStatus: 'em-revisao',
+      source: {
+        name: 'ExerciseAPI',
+        recordId: 'barbell_back_squat',
+        url: 'https://exercise-api.com/v1/exercises/barbell_back_squat',
+        license: 'CC BY 4.0',
+      },
+    },
+  }),
   makeExercise('leg-press', 'Leg press', ['leg 45', 'prensa'], 'Pernas', 'Máquina', ['Apoie toda a lombar.', 'Desça até onde mantém o quadril estável.', 'Empurre sem travar os joelhos.']),
   makeExercise('cadeira-extensora', 'Cadeira extensora', ['extensora'], 'Pernas', 'Máquina', ['Ajuste o eixo à altura do joelho.', 'Estenda de forma controlada.', 'Retorne sem soltar o peso.']),
   makeExercise('mesa-flexora', 'Mesa flexora', ['flexora deitada'], 'Posterior', 'Máquina', ['Mantenha o quadril apoiado.', 'Flexione sem tirar o corpo do banco.', 'Controle a volta.']),
