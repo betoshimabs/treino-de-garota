@@ -34,3 +34,14 @@
 *.sqlite3
 *.dump
 *.bak
+
+# Firebase local administration, emulators, logs and exports
+/.firebase/
+/firebase-export/
+/auth-export*
+/firestore-export*
+firebase-debug.log*
+firestore-debug.log*
+database-debug.log*
+ui-debug.log*
+application_default_credentials.json
