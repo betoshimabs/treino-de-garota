@@ -141,7 +141,7 @@ function UserDataBoundary({ userId, children }: { userId: string; children: Reac
   if (state === 'legacy') {
     return <main className="auth-shell"><section className="auth-card migration-card">
       <BrandSignature />
-      <p className="eyebrow">um cuidado antes de entrar</p>
+      <p className="eyebrow">Um cuidado antes de entrar</p>
       <h1>Encontramos seu diário deste aparelho.</h1>
       <p>Você pode vinculá-lo a esta conta. A cópia anterior será preservada como segurança.</p>
       <button className="primary-button wide" disabled={busy} onClick={async () => {
@@ -154,8 +154,8 @@ function UserDataBoundary({ userId, children }: { userId: string; children: Reac
         } finally {
           setBusy(false)
         }
-      }}>{busy ? 'trazendo seus dados…' : 'trazer meu diário'}</button>
-      <button className="auth-text-button" disabled={busy} onClick={() => { keepLegacyDataSeparate(); setState('ready') }}>começar vazio nesta conta</button>
+      }}>{busy ? 'Trazendo seus dados…' : 'Trazer meu diário'}</button>
+      <button className="auth-text-button" disabled={busy} onClick={() => { keepLegacyDataSeparate(); setState('ready') }}>Começar vazio nesta conta</button>
     </section></main>
   }
   return children
@@ -206,12 +206,12 @@ function AuthScreen() {
 
   return <main className="auth-shell"><section className="auth-card">
     <BrandSignature />
-    {mode === 'reset' ? <button className="auth-back" onClick={() => changeMode('signin')}><ArrowLeft size={18} /> voltar</button> : <div className="auth-tabs" role="tablist" aria-label="Acesso à conta">
-      <button role="tab" aria-selected={mode === 'signin'} className={mode === 'signin' ? 'selected' : ''} onClick={() => changeMode('signin')}>entrar</button>
-      <button role="tab" aria-selected={mode === 'signup'} className={mode === 'signup' ? 'selected' : ''} onClick={() => changeMode('signup')}>criar conta</button>
+    {mode === 'reset' ? <button className="auth-back" onClick={() => changeMode('signin')}><ArrowLeft size={18} /> Voltar</button> : <div className="auth-tabs" role="tablist" aria-label="Acesso à conta">
+      <button role="tab" aria-selected={mode === 'signin'} className={mode === 'signin' ? 'selected' : ''} onClick={() => changeMode('signin')}>Entrar</button>
+      <button role="tab" aria-selected={mode === 'signup'} className={mode === 'signup' ? 'selected' : ''} onClick={() => changeMode('signup')}>Criar conta</button>
     </div>}
     <div className="auth-heading">
-      <p className="eyebrow">{mode === 'signin' ? 'bom te ver por aqui' : mode === 'signup' ? 'seu diário começa aqui' : 'recuperar acesso'}</p>
+      <p className="eyebrow">{mode === 'signin' ? 'Bom te ver por aqui' : mode === 'signup' ? 'Seu diário começa aqui' : 'Recuperar acesso'}</p>
       <h1>{mode === 'signin' ? 'Entre na Brabita.' : mode === 'signup' ? 'Crie sua conta.' : 'Esqueceu a senha?'}</h1>
       <p>{mode === 'reset' ? 'Digite seu e-mail e enviaremos um link de redefinição.' : 'Seus registros ficam neste aparelho, separados pela sua conta.'}</p>
     </div>
@@ -219,22 +219,22 @@ function AuthScreen() {
       setError('')
       setBusy(true)
       try { await signInWithGoogle() } catch (caught) { setError(getAuthErrorMessage(caught)) } finally { setBusy(false) }
-    }}><GoogleMark /> continuar com Google</button>}
-    {mode !== 'reset' && <div className="auth-divider"><span>ou use seu e-mail</span></div>}
+    }}><GoogleMark /> Continuar com Google</button>}
+    {mode !== 'reset' && <div className="auth-divider"><span>Ou use seu e-mail</span></div>}
     <form className="auth-form" onSubmit={(event) => void submit(event)}>
-      {mode === 'signup' && <label><span>como quer ser chamada?</span><input autoComplete="name" value={name} onChange={(event) => setName(event.target.value)} placeholder="seu nome ou apelido" required /></label>}
-      <label><span>e-mail</span><input type="email" inputMode="email" autoComplete="email" value={email} onChange={(event) => setEmail(event.target.value)} placeholder="voce@exemplo.com" required /></label>
-      {mode !== 'reset' && <label><span>senha</span><span className="password-field"><input type={showPassword ? 'text' : 'password'} autoComplete={mode === 'signup' ? 'new-password' : 'current-password'} minLength={6} value={password} onChange={(event) => setPassword(event.target.value)} placeholder={mode === 'signup' ? 'pelo menos 6 caracteres' : 'sua senha'} required /><button type="button" aria-label={showPassword ? 'Ocultar senha' : 'Mostrar senha'} onClick={() => setShowPassword((value) => !value)}>{showPassword ? <EyeOff size={19} /> : <Eye size={19} />}</button></span></label>}
-      {mode === 'signup' && <label><span>repita a senha</span><input type="password" autoComplete="new-password" minLength={6} value={confirmPassword} onChange={(event) => setConfirmPassword(event.target.value)} required /></label>}
+      {mode === 'signup' && <label><span>Como quer ser chamada?</span><input autoComplete="name" value={name} onChange={(event) => setName(event.target.value)} placeholder="Seu nome ou apelido" required /></label>}
+      <label><span>E-mail</span><input type="email" inputMode="email" autoComplete="email" value={email} onChange={(event) => setEmail(event.target.value)} placeholder="voce@exemplo.com" required /></label>
+      {mode !== 'reset' && <label><span>Senha</span><span className="password-field"><input type={showPassword ? 'text' : 'password'} autoComplete={mode === 'signup' ? 'new-password' : 'current-password'} minLength={6} value={password} onChange={(event) => setPassword(event.target.value)} placeholder={mode === 'signup' ? 'Pelo menos 6 caracteres' : 'Sua senha'} required /><button type="button" aria-label={showPassword ? 'Ocultar senha' : 'Mostrar senha'} onClick={() => setShowPassword((value) => !value)}>{showPassword ? <EyeOff size={19} /> : <Eye size={19} />}</button></span></label>}
+      {mode === 'signup' && <label><span>Repita a senha</span><input type="password" autoComplete="new-password" minLength={6} value={confirmPassword} onChange={(event) => setConfirmPassword(event.target.value)} required /></label>}
       {error && <p className="auth-feedback error" role="alert">{error}</p>}
       {message && <p className="auth-feedback success" role="status"><Check size={17} /> {message}</p>}
-      <button className="primary-button wide" disabled={busy}>{busy ? 'só um instante…' : mode === 'signin' ? <><LogIn size={18} /> entrar</> : mode === 'signup' ? 'criar minha conta' : <><Mail size={18} /> enviar link</>}</button>
+      <button className="primary-button wide" disabled={busy}>{busy ? 'Só um instante…' : mode === 'signin' ? <><LogIn size={18} /> Entrar</> : mode === 'signup' ? 'Criar minha conta' : <><Mail size={18} /> Enviar link</>}</button>
     </form>
-    {mode === 'signin' && <button className="auth-text-button" onClick={() => changeMode('reset')}>esqueci minha senha</button>}
+    {mode === 'signin' && <button className="auth-text-button" onClick={() => changeMode('reset')}>Esqueci minha senha</button>}
     <details className="origin-migration-note">
-      <summary>já usava a versão de teste?</summary>
+      <summary>Já usava a versão de teste?</summary>
       <p>Os navegadores não levam dados automaticamente de um domínio para outro. Abra a versão anterior, baixe o backup em <strong>Eu → Seus dados</strong> e restaure aqui depois de entrar.</p>
-      <a href="https://betoshimabs.github.io/treino-de-garota/#/eu" target="_blank" rel="noreferrer">abrir versão anterior</a>
+      <a href="https://betoshimabs.github.io/treino-de-garota/#/eu" target="_blank" rel="noreferrer">Abrir versão anterior</a>
     </details>
   </section></main>
 }
@@ -247,7 +247,7 @@ function VerifyEmailScreen({ email }: { email: string }) {
   return <main className="auth-shell"><section className="auth-card verification-card">
     <BrandSignature />
     <span className="mail-orbit"><Mail /></span>
-    <p className="eyebrow">confirme que é você</p>
+    <p className="eyebrow">Confirme que é você</p>
     <h1>Olhe seu e-mail.</h1>
     <p>Enviamos um link de confirmação para <strong>{email}</strong>. Depois de confirmar, volte aqui.</p>
     {error && <p className="auth-feedback error" role="alert">{error}</p>}
@@ -258,12 +258,12 @@ function VerifyEmailScreen({ email }: { email: string }) {
         await refreshAccount()
         if (!auth.currentUser?.emailVerified) setError('A confirmação ainda não apareceu. Abra o link recebido e tente novamente.')
       } catch (caught) { setError(getAuthErrorMessage(caught)) } finally { setBusy(false) }
-    }}><RotateCcw size={18} /> já confirmei</button>
+    }}><RotateCcw size={18} /> Já confirmei</button>
     <button className="auth-text-button" disabled={busy} onClick={async () => {
       setBusy(true); setError('')
       try { await resendVerification(); setMessage('Enviamos um novo e-mail de confirmação.') } catch (caught) { setError(getAuthErrorMessage(caught)) } finally { setBusy(false) }
-    }}>enviar novamente</button>
-    <button className="auth-text-button muted" disabled={busy} onClick={() => void signOutAccount()}>usar outra conta</button>
+    }}>Enviar novamente</button>
+    <button className="auth-text-button muted" disabled={busy} onClick={() => void signOutAccount()}>Usar outra conta</button>
   </section></main>
 }
 
@@ -272,7 +272,7 @@ function AuthLoading({ text }: { text: string }) {
 }
 
 function AuthMessage({ title, text }: { title: string; text: string }) {
-  return <main className="auth-shell"><section className="auth-card verification-card"><BrandSignature /><h1>{title}</h1><p>{text}</p><button className="primary-button" onClick={() => window.location.reload()}>tentar novamente</button></section></main>
+  return <main className="auth-shell"><section className="auth-card verification-card"><BrandSignature /><h1>{title}</h1><p>{text}</p><button className="primary-button" onClick={() => window.location.reload()}>Tentar novamente</button></section></main>
 }
 
 function BrandSignature() {

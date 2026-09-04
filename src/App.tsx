@@ -45,11 +45,13 @@ import { canShowInstallNudge, consumeCapturedInstallPrompt, getInstallPlatform, 
 import { getAuthErrorMessage, useAuth } from './auth'
 import { exerciseProgress, thisMonthCount, totalCompletedSets, workoutDurationMinutes } from './stats'
 import { MAX_TIMELINE_PHOTOS, timelineImages, timelineMedia } from './timeline'
+import { getWeekdayInvitation } from './home-copy'
 import type { ActivityCategory, AppSnapshot, Exercise, Feeling, MetricMode, Profile, ProfileAvatar, TimelineEntry, Workout, WorkoutItem, WorkoutMetric, WorkoutSet, WorkoutTemplate } from './types'
 
 const makeId = () => crypto.randomUUID()
 const formatDay = (value: string) => new Intl.DateTimeFormat('pt-BR', { day: '2-digit', month: 'short' }).format(new Date(value)).replace('.', '')
-const formatLongDate = (value: string) => new Intl.DateTimeFormat('pt-BR', { weekday: 'long', day: 'numeric', month: 'long' }).format(new Date(value))
+const sentenceCase = (value: string) => value ? `${value.charAt(0).toLocaleUpperCase('pt-BR')}${value.slice(1)}` : value
+const formatLongDate = (value: string) => sentenceCase(new Intl.DateTimeFormat('pt-BR', { weekday: 'long', day: 'numeric', month: 'long' }).format(new Date(value)))
 const formatTime = (value: string) => new Intl.DateTimeFormat('pt-BR', { hour: '2-digit', minute: '2-digit' }).format(new Date(value))
 const emptySnapshot: AppSnapshot = { workouts: [], timeline: [], favorites: [], customExercises: [], customTemplates: [], profile: defaultProfile }
 const BRAND_ICON_URL = `${import.meta.env.BASE_URL}brabita-icon-192.png`
@@ -224,18 +226,18 @@ function AppContent() {
       )}
       {activeWorkout && !location.pathname.startsWith('/treino/ativo') && (
         <NavLink className="active-workout-bar" to="/treino/ativo">
-          <span><span className="pulse-dot" /> treino em andamento</span>
-          <span>continuar <ChevronRight size={17} /></span>
+          <span><span className="pulse-dot" /> Treino em andamento</span>
+          <span>Continuar <ChevronRight size={17} /></span>
         </NavLink>
       )}
       {showInstall && <aside className={`install-nudge ${showNav ? '' : 'during-workout'}`} aria-label="Instalar aplicativo">
         <img className="install-mark" src={BRAND_ICON_URL} alt="" />
-        <div><strong>levar o diário com você</strong><p>{showIosHelp ? getManualInstallSteps(installPlatform).join(' ') : 'Instale para abrir rápido e usar offline.'}</p></div>
+        <div><strong>Levar o diário com você</strong><p>{showIosHelp ? getManualInstallSteps(installPlatform).join(' ') : 'Instale para abrir rápido e usar offline.'}</p></div>
         {!showIosHelp && <button className="install-action" onClick={async () => {
           const result = await requestPwaInstall()
           if (result === 'instructions') setShowIosHelp(true)
-        }}>instalar</button>}
-        <button className="install-later" onClick={snoozeInstallNudge}>lembrar mais tarde</button>
+        }}>Instalar</button>}
+        <button className="install-later" onClick={snoozeInstallNudge}>Lembrar mais tarde</button>
       </aside>}
       <main id="conteudo" className={showNav ? 'page-area with-nav' : 'page-area'}>
         <Routes>
@@ -271,7 +273,7 @@ function Onboarding({ profile, onDone }: { profile: Profile; onDone: (profile: P
   return (
     <main className="onboarding">
       <div className="onboarding-mark"><img className="brand-logo" src={BRAND_ICON_URL} alt="" /><span className="brand-name">Brabita</span></div>
-      <p className="eyebrow">seu diário de treino</p>
+      <p className="eyebrow">Seu diário de treino</p>
       <h1>Do jeito que<br />aconteceu.</h1>
       <p className="lead">Registre seu treino e acompanhe sua história, sem cobrança.</p>
       <section className="onboarding-choice" aria-labelledby="unit-title">
@@ -284,23 +286,30 @@ function Onboarding({ profile, onDone }: { profile: Profile; onDone: (profile: P
       <button className="primary-button wide" disabled={busy} onClick={async () => {
         setBusy(true)
         await onDone({ ...profile, loadUnit: unit, onboarded: true })
-      }}>começar meu diário <ChevronRight size={19} /></button>
+      }}>Começar meu diário <ChevronRight size={19} /></button>
       <p className="privacy-note"><Info size={16} /> Seu diário fica neste aparelho e é separado pela sua conta.</p>
     </main>
   )
 }
 
-function PageHeader({ eyebrow, title, action }: { eyebrow?: string; title: string; action?: ReactNode }) {
-  const waveVariant = title === 'hoje' ? 'one' : title === 'minha linha' ? 'two' : title === 'biblioteca' ? 'three' : title === 'evolução' ? 'four' : 'five'
-  return <header className={`page-header wave-${waveVariant}`}><div>{eyebrow && <p className="eyebrow">{eyebrow}</p>}<h1>{title}</h1></div>{action}</header>
+type PageHeaderVariant = 'home' | 'timeline' | 'library' | 'evolution' | 'profile'
+
+function PageHeader({ eyebrow, title, action, variant }: { eyebrow?: string; title: string; action?: ReactNode; variant: PageHeaderVariant }) {
+  return <header className={`page-header header-${variant}`}>
+    <svg className="page-header-ribbon" viewBox="0 0 760 150" preserveAspectRatio="none" aria-hidden="true" focusable="false">
+      <path d="M-24 0H784V72C704 77 655 95 575 88C487 81 433 110 340 114C239 118 188 87 102 93C49 98 11 113-24 120Z" />
+    </svg>
+    <div>{eyebrow && <p className="eyebrow">{eyebrow}</p>}<h1>{title}</h1></div>{action}
+  </header>
 }
 
 function TodayPage({ data, refresh, allExercises, allTemplates }: SharedProps) {
   const navigate = useNavigate()
   const completed = data.workouts.filter((workout) => workout.status === 'completed')
   const active = data.workouts.find((workout) => workout.status === 'active')
-  const hour = new Date().getHours()
-  const greeting = hour < 12 ? 'bom dia' : hour < 18 ? 'boa tarde' : 'boa noite'
+  const now = new Date()
+  const hour = now.getHours()
+  const greeting = hour < 12 ? 'Bom dia' : hour < 18 ? 'Boa tarde' : 'Boa noite'
   const monthCount = thisMonthCount(data.workouts)
 
   const startWorkout = async (repeat?: Workout, template?: WorkoutTemplate) => {
@@ -325,7 +334,7 @@ function TodayPage({ data, refresh, allExercises, allTemplates }: SharedProps) {
 
   return (
     <div className="page today-page">
-      <PageHeader eyebrow={`${greeting}${data.profile.nickname ? `, ${data.profile.nickname}` : ''}`} title="hoje" action={<span className="date-stamp">{formatDay(new Date().toISOString())}</span>} />
+      <PageHeader variant="home" eyebrow={`${greeting}${data.profile.nickname ? `, ${data.profile.nickname}` : ''}`} title={getWeekdayInvitation(now)} action={<span className="date-stamp">{formatDay(now.toISOString())}</span>} />
       <section className="hero-action">
         <div className="soft-orbit"><Dumbbell size={31} strokeWidth={1.8} /></div>
         <div>
@@ -334,23 +343,23 @@ function TodayPage({ data, refresh, allExercises, allTemplates }: SharedProps) {
         </div>
         <button className="round-action" aria-label={active ? 'Continuar treino' : 'Começar treino'} onClick={() => void startWorkout()}><Play size={23} fill="currentColor" /></button>
       </section>
-      {completed[0] && !active && <button className="quiet-action" onClick={() => void startWorkout(completed[0])}><RotateCcw size={17} /> repetir o último treino</button>}
+      {completed[0] && !active && <button className="quiet-action" onClick={() => void startWorkout(completed[0])}><RotateCcw size={17} /> Repetir o último treino</button>}
 
       {!active && <section className="template-shortcuts" aria-labelledby="template-shortcuts-title">
-        <div className="section-heading"><div><p className="eyebrow">para começar mais rápido</p><h2 id="template-shortcuts-title">modelos de treino</h2></div><NavLink to="/exercicios">ver todos</NavLink></div>
+        <div className="section-heading"><div><p className="eyebrow">Para começar mais rápido</p><h2 id="template-shortcuts-title">Modelos de treino</h2></div><NavLink to="/exercicios">Ver todos</NavLink></div>
         <div className="template-scroll">{allTemplates.slice(0, 4).map((template) => <button key={template.id} onClick={() => void startWorkout(undefined, template)}><strong>{template.name}</strong><small>{template.note}</small><Play size={16} /></button>)}</div>
       </section>}
 
       <section className="at-a-glance" aria-labelledby="glance-title">
-        <div className="section-heading"><div><p className="eyebrow">um olhar rápido</p><h2 id="glance-title">seu ritmo</h2></div></div>
+        <div className="section-heading"><div><p className="eyebrow">Um olhar rápido</p><h2 id="glance-title">Seu ritmo</h2></div></div>
         <div className="glance-grid">
           <div><strong>{monthCount}</strong><span>{monthCount === 1 ? 'treino este mês' : 'treinos este mês'}</span></div>
-          <div><strong>{totalCompletedSets(data.workouts)}</strong><span>registros concluídos</span></div>
+          <div><strong>{totalCompletedSets(data.workouts)}</strong><span>Registros concluídos</span></div>
         </div>
       </section>
 
       <section className="recent-section" aria-labelledby="recent-title">
-        <div className="section-heading"><h2 id="recent-title">últimos treinos</h2>{completed.length > 0 && <NavLink to="/linha">ver na linha</NavLink>}</div>
+        <div className="section-heading"><h2 id="recent-title">Últimos treinos</h2>{completed.length > 0 && <NavLink to="/linha">Ver na linha</NavLink>}</div>
         {completed.length === 0 ? (
           <div className="empty-gentle"><NotebookPen size={22} /><p>Quando você finalizar um treino, ele aparece aqui.</p></div>
         ) : completed.slice(0, 3).map((workout) => (
@@ -361,7 +370,7 @@ function TodayPage({ data, refresh, allExercises, allTemplates }: SharedProps) {
           </NavLink>
         ))}
       </section>
-      <p className="little-note"><span>✦</span> voltar também faz parte</p>
+      <p className="little-note"><span>✦</span> Voltar também faz parte</p>
     </div>
   )
 }
@@ -394,7 +403,7 @@ function WorkoutPage({ data, refresh, setNotice, allExercises, allTemplates }: S
     return () => { window.cancelAnimationFrame(focusFrame); document.body.style.overflow = previous }
   }, [pickerOpen])
 
-  if (!active) return <SimpleEmpty icon={<Dumbbell />} title="Nenhum treino em andamento" action={<button className="primary-button" onClick={() => navigate('/')}>voltar para hoje</button>} />
+  if (!active) return <SimpleEmpty icon={<Dumbbell />} title="Nenhum treino em andamento" action={<button className="primary-button" onClick={() => navigate('/')}>Voltar para o início</button>} />
 
   const persist = async (next: Workout) => { await db.workouts.put(next); await refresh() }
   const updateItem = async (itemId: string, fn: (item: WorkoutItem) => WorkoutItem) => {
@@ -514,7 +523,7 @@ function WorkoutPage({ data, refresh, setNotice, allExercises, allTemplates }: S
     <div className="workout-page">
       <header className="workout-topbar">
         <button className="icon-button" aria-label="Voltar" onClick={() => navigate('/')}><ArrowLeft /></button>
-        <div><p>treino em andamento</p><strong>{elapsed < 1 ? 'agora' : `${elapsed} min`}</strong></div>
+        <div><p>Treino em andamento</p><strong>{elapsed < 1 ? 'Agora' : `${elapsed} min`}</strong></div>
         <button className="stop-workout-button" aria-label="Parar ou cancelar treino" title="Parar ou cancelar treino" onClick={() => setAbandonConfirm(true)}><Square size={18} fill="currentColor" /></button>
       </header>
       <div className="workout-title-wrap">
@@ -523,11 +532,11 @@ function WorkoutPage({ data, refresh, setNotice, allExercises, allTemplates }: S
       </div>
 
       <div className="workout-sections" role="tablist" aria-label="Tipo de atividade">
-        <button role="tab" aria-selected={section === 'strength'} className={section === 'strength' ? 'selected' : ''} onClick={() => { setSection('strength'); setQuery('') }}><Dumbbell size={17} /><span>musculação</span><small>{strengthCount}</small></button>
-        <button role="tab" aria-selected={section === 'activities'} className={section === 'activities' ? 'selected' : ''} onClick={() => { setSection('activities'); setQuery('') }}><Clock3 size={17} /><span>cardio e outras</span><small>{activityCount}</small></button>
+        <button role="tab" aria-selected={section === 'strength'} className={section === 'strength' ? 'selected' : ''} onClick={() => { setSection('strength'); setQuery('') }}><Dumbbell size={17} /><span>Musculação</span><small>{strengthCount}</small></button>
+        <button role="tab" aria-selected={section === 'activities'} className={section === 'activities' ? 'selected' : ''} onClick={() => { setSection('activities'); setQuery('') }}><Clock3 size={17} /><span>Cardio e outras</span><small>{activityCount}</small></button>
       </div>
 
-      {section === 'strength' && <div className="rest-preference"><button onClick={() => setRestOpen(!restOpen)} aria-expanded={restOpen}><Clock3 size={16} /> descanso {formatTimer(active.restSeconds ?? 90)} <SlidersHorizontal size={15} /></button>{restOpen && <div className="rest-options" aria-label="Tempo de descanso">{[45, 60, 90, 120, 180].map((value) => <button className={(active.restSeconds ?? 90) === value ? 'selected' : ''} key={value} onClick={() => void persist({ ...active, restSeconds: value })}>{formatTimer(value)}</button>)}</div>}</div>}
+      {section === 'strength' && <div className="rest-preference"><button onClick={() => setRestOpen(!restOpen)} aria-expanded={restOpen}><Clock3 size={16} /> Descanso {formatTimer(active.restSeconds ?? 90)} <SlidersHorizontal size={15} /></button>{restOpen && <div className="rest-options" aria-label="Tempo de descanso">{[45, 60, 90, 120, 180].map((value) => <button className={(active.restSeconds ?? 90) === value ? 'selected' : ''} key={value} onClick={() => void persist({ ...active, restSeconds: value })}>{formatTimer(value)}</button>)}</div>}</div>}
 
       {visibleItems.length === 0 ? (
         <div className="workout-empty">
@@ -540,7 +549,7 @@ function WorkoutPage({ data, refresh, setNotice, allExercises, allTemplates }: S
           <section className="exercise-block" key={item.id} aria-labelledby={`exercise-${item.id}`}>
             <div className="exercise-block-title"><span>{String(itemIndex + 1).padStart(2, '0')}</span><h2 id={`exercise-${item.id}`}>{item.exerciseName}</h2><button className="icon-button small" aria-label={`Remover ${item.exerciseName}`} onClick={() => void persist({ ...active, items: active.items.filter((row) => row.id !== item.id) })}><X /></button></div>
             <MetricSelector item={item} unit={data.profile.loadUnit} onToggle={(metric) => void toggleMetric(item.id, metric)} />
-            <div className="set-head"><span>{item.category === 'strength' ? 'série' : 'reg.'}</span><MetricLabels metrics={item.metrics ?? defaultMetricsForMode(item.metricMode)} unit={data.profile.loadUnit} /><span>feito</span><span aria-hidden="true" /></div>
+            <div className="set-head"><span>{item.category === 'strength' ? 'Série' : 'Reg.'}</span><MetricLabels metrics={item.metrics ?? defaultMetricsForMode(item.metricMode)} unit={data.profile.loadUnit} /><span>Feito</span><span aria-hidden="true" /></div>
             {item.sets.map((set, setIndex) => (
               <div className={set.completed ? 'set-row completed' : 'set-row'} key={set.id}>
                 <span className="set-number">{setIndex + 1}</span>
@@ -549,29 +558,29 @@ function WorkoutPage({ data, refresh, setNotice, allExercises, allTemplates }: S
                 <button className="remove-set" aria-label={`Excluir ${item.category === 'strength' ? 'série' : 'registro'} ${setIndex + 1}`} onClick={() => void updateItem(item.id, (row) => ({ ...row, sets: row.sets.filter((entry) => entry.id !== set.id) }))}><Trash2 size={16} /></button>
               </div>
             ))}
-            <button className="add-set" onClick={() => void updateItem(item.id, (row) => ({ ...row, sets: [...row.sets, { ...row.sets.at(-1), id: makeId(), completed: false }] }))}><Plus size={17} /> adicionar {item.category === 'strength' ? 'série' : 'registro'}</button>
+            <button className="add-set" onClick={() => void updateItem(item.id, (row) => ({ ...row, sets: [...row.sets, { ...row.sets.at(-1), id: makeId(), completed: false }] }))}><Plus size={17} /> Adicionar {item.category === 'strength' ? 'série' : 'registro'}</button>
             <ExerciseNoteInput itemId={item.id} exerciseName={item.exerciseName} value={item.note} onCommit={(value) => void updateItem(item.id, (row) => ({ ...row, note: value }))} />
           </section>
         ))}
         <button className="workout-add-plus after-list" aria-label={section === 'strength' ? 'Adicionar outro exercício' : 'Adicionar outra atividade'} onClick={openPicker}><Plus size={26} /></button>
       </>}
 
-      {seconds > 0 && <div className="rest-timer"><Clock3 size={18} /><span>descanso</span><button aria-label="Diminuir descanso em 15 segundos" onClick={() => setSeconds((value) => Math.max(15, value - 15))}>−15</button><strong>{formatTimer(seconds)}</strong><button aria-label="Aumentar descanso em 15 segundos" onClick={() => setSeconds((value) => value + 15)}>+15</button><button aria-label="Encerrar descanso" onClick={() => setSeconds(0)}><X size={17} /></button></div>}
+      {seconds > 0 && <div className="rest-timer"><Clock3 size={18} /><span>Descanso</span><button aria-label="Diminuir descanso em 15 segundos" onClick={() => setSeconds((value) => Math.max(15, value - 15))}>−15</button><strong>{formatTimer(seconds)}</strong><button aria-label="Aumentar descanso em 15 segundos" onClick={() => setSeconds((value) => value + 15)}>+15</button><button aria-label="Encerrar descanso" onClick={() => setSeconds(0)}><X size={17} /></button></div>}
       <section className="finish-area">
-        <p>como foi hoje? <span>opcional</span></p>
+        <p>Como foi hoje? <span>Opcional</span></p>
         <div className="feeling-row">
-          {(['leve', 'normal', 'intenso'] as Feeling[]).map((value) => <button className={feeling === value ? 'selected' : ''} key={value} onClick={() => setFeeling(feeling === value ? undefined : value)}>{value}</button>)}
+          {(['leve', 'normal', 'intenso'] as Feeling[]).map((value) => <button className={feeling === value ? 'selected' : ''} key={value} onClick={() => setFeeling(feeling === value ? undefined : value)}>{sentenceCase(value)}</button>)}
         </div>
-        <button className="primary-button wide" onClick={() => void askToFinish()}><Check size={19} /> finalizar treino</button>
+        <button className="primary-button wide" onClick={() => void askToFinish()}><Check size={19} /> Finalizar treino</button>
       </section>
 
-      {pickerOpen && <div className="sheet-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) closePicker() }}><section className="bottom-sheet exercise-picker-sheet" role="dialog" aria-modal="true" aria-labelledby="picker-title"><div className="sheet-handle" /><header><h2 id="picker-title">adicionar ao treino</h2><button className="icon-button" aria-label="Fechar" onClick={closePicker}><X /></button></header><div className="picker-tabs" role="tablist" aria-label="O que adicionar"><button role="tab" aria-selected={pickerMode === 'exercise'} className={pickerMode === 'exercise' ? 'selected' : ''} onClick={() => { setPickerMode('exercise'); setQuery('') }}>exercício</button><button role="tab" aria-selected={pickerMode === 'template'} className={pickerMode === 'template' ? 'selected' : ''} onClick={() => { setPickerMode('template'); setQuery('') }}>modelo</button></div><label className="search-field"><Search size={19} /><input placeholder={pickerMode === 'exercise' ? (section === 'strength' ? 'buscar exercício' : 'buscar cardio ou atividade') : 'buscar modelo'} value={query} onChange={(event) => setQuery(event.target.value)} /></label>{pickerMode === 'exercise' ? <div className="picker-list" tabIndex={-1}>{filtered.map((exercise) => <button key={exercise.id} onClick={() => void addExercise(exercise)}><ExerciseArtwork exercise={exercise} compact /><span><strong>{exercise.name}</strong><small>{exercise.group} · {exercise.equipment}</small></span><Plus size={19} /></button>)}</div> : <div className="picker-list picker-template-list" tabIndex={-1}>{filteredTemplates.map((template) => <button key={template.id} onClick={() => void addTemplate(template)}><span className="template-picker-mark" /><span><strong>{template.name}</strong><small>{template.note}</small><em>{template.exerciseIds.slice(0, 3).map((id) => allExercises.find((exercise) => exercise.id === id)?.name).filter(Boolean).join(' · ')}</em></span><Plus size={19} /></button>)}</div>}</section></div>}
+      {pickerOpen && <div className="sheet-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) closePicker() }}><section className="bottom-sheet exercise-picker-sheet" role="dialog" aria-modal="true" aria-labelledby="picker-title"><div className="sheet-handle" /><header><h2 id="picker-title">Adicionar ao treino</h2><button className="icon-button" aria-label="Fechar" onClick={closePicker}><X /></button></header><div className="picker-tabs" role="tablist" aria-label="O que adicionar"><button role="tab" aria-selected={pickerMode === 'exercise'} className={pickerMode === 'exercise' ? 'selected' : ''} onClick={() => { setPickerMode('exercise'); setQuery('') }}>Exercício</button><button role="tab" aria-selected={pickerMode === 'template'} className={pickerMode === 'template' ? 'selected' : ''} onClick={() => { setPickerMode('template'); setQuery('') }}>Modelo</button></div><label className="search-field"><Search size={19} /><input placeholder={pickerMode === 'exercise' ? (section === 'strength' ? 'Buscar exercício' : 'Buscar cardio ou atividade') : 'Buscar modelo'} value={query} onChange={(event) => setQuery(event.target.value)} /></label>{pickerMode === 'exercise' ? <div className="picker-list" tabIndex={-1}>{filtered.map((exercise) => <button key={exercise.id} onClick={() => void addExercise(exercise)}><ExerciseArtwork exercise={exercise} compact /><span><strong>{exercise.name}</strong><small>{exercise.group} · {exercise.equipment}</small></span><Plus size={19} /></button>)}</div> : <div className="picker-list picker-template-list" tabIndex={-1}>{filteredTemplates.map((template) => <button key={template.id} onClick={() => void addTemplate(template)}><span className="template-picker-mark" /><span><strong>{template.name}</strong><small>{template.note}</small><em>{template.exerciseIds.slice(0, 3).map((id) => allExercises.find((exercise) => exercise.id === id)?.name).filter(Boolean).join(' · ')}</em></span><Plus size={19} /></button>)}</div>}</section></div>}
 
-      <ConfirmDialog open={finishConfirm} title="guardar este treino?" confirmLabel="guardar treino" onClose={() => setFinishConfirm(false)} onConfirm={() => void finish()} busy={actionBusy}>
+      <ConfirmDialog open={finishConfirm} title="Guardar este treino?" confirmLabel="Guardar treino" onClose={() => setFinishConfirm(false)} onConfirm={() => void finish()} busy={actionBusy}>
         <p>Confira o que vai entrar na sua linha.</p>
-        <div className="workout-confirm-summary"><strong>{elapsed < 1 ? 'menos de 1 min' : `${elapsed} min`}</strong><span>{completedItemCount} {completedItemCount === 1 ? 'atividade' : 'atividades'}</span><span>{completedSetCount} {completedSetCount === 1 ? 'registro concluído' : 'registros concluídos'}</span>{feeling && <span>sensação: {feeling}</span>}</div>
+        <div className="workout-confirm-summary"><strong>{elapsed < 1 ? 'Menos de 1 min' : `${elapsed} min`}</strong><span>{completedItemCount} {completedItemCount === 1 ? 'atividade' : 'atividades'}</span><span>{completedSetCount} {completedSetCount === 1 ? 'registro concluído' : 'registros concluídos'}</span>{feeling && <span>Sensação: {feeling}</span>}</div>
       </ConfirmDialog>
-      <ConfirmDialog open={abandonConfirm} title="apagar este treino?" confirmLabel="apagar treino" tone="danger" onClose={() => setAbandonConfirm(false)} onConfirm={() => void abandon()} busy={actionBusy}>
+      <ConfirmDialog open={abandonConfirm} title="Apagar este treino?" confirmLabel="Apagar treino" tone="danger" onClose={() => setAbandonConfirm(false)} onConfirm={() => void abandon()} busy={actionBusy}>
         <p>As séries e atividades deste treino em andamento serão removidas deste aparelho.</p>
       </ConfirmDialog>
     </div>
@@ -587,14 +596,14 @@ function metricLabel(metric: WorkoutMetric, unit: Profile['loadUnit'], compact =
 
 function MetricSelector({ item, unit, onToggle }: { item: WorkoutItem; unit: Profile['loadUnit']; onToggle: (metric: WorkoutMetric) => void }) {
   const metrics = item.metrics ?? defaultMetricsForMode(item.metricMode)
-  return <details className="metric-selector"><summary><SlidersHorizontal size={15} /><span>o que registrar</span><small>{metrics.map((metric) => metricLabel(metric, unit, true)).join(' · ')}</small></summary><div className="metric-options" role="group" aria-label={`Métricas de ${item.exerciseName}`}>{workoutMetricOrder.map((metric) => {
+  return <details className="metric-selector"><summary><SlidersHorizontal size={15} /><span>O que registrar</span><small>{metrics.map((metric) => sentenceCase(metricLabel(metric, unit, true))).join(' · ')}</small></summary><div className="metric-options" role="group" aria-label={`Métricas de ${item.exerciseName}`}>{workoutMetricOrder.map((metric) => {
     const selected = metrics.includes(metric)
-    return <button type="button" key={metric} className={selected ? 'selected' : ''} aria-pressed={selected} onClick={() => onToggle(metric)}>{selected ? <Check size={15} /> : <Plus size={15} />}{metricLabel(metric, unit, true)}</button>
+    return <button type="button" key={metric} className={selected ? 'selected' : ''} aria-pressed={selected} onClick={() => onToggle(metric)}>{selected ? <Check size={15} /> : <Plus size={15} />}{sentenceCase(metricLabel(metric, unit, true))}</button>
   })}</div></details>
 }
 
 function MetricLabels({ metrics, unit }: { metrics: WorkoutMetric[]; unit: Profile['loadUnit'] }) {
-  return <span className={`metric-labels metrics-${metrics.length}`}>{metrics.map((metric) => <span key={metric}>{metricLabel(metric, unit)}</span>)}</span>
+  return <span className={`metric-labels metrics-${metrics.length}`}>{metrics.map((metric) => <span key={metric}>{sentenceCase(metricLabel(metric, unit))}</span>)}</span>
 }
 
 function MetricFields({ metrics, unit, set, index, onCommit }: { metrics: WorkoutMetric[]; unit: Profile['loadUnit']; set: WorkoutSet; index: number; onCommit: (patch: Partial<WorkoutSet>) => void }) {
@@ -624,7 +633,7 @@ function ExerciseNoteInput({ itemId, exerciseName, value, onCommit }: { itemId: 
     onCommit(next)
   }
 
-  return <textarea ref={inputRef} rows={1} className="note-input" aria-label={`Observação sobre ${exerciseName}`} placeholder="uma observação, se quiser…" value={draft} onChange={(event) => {
+  return <textarea ref={inputRef} rows={1} className="note-input" aria-label={`Observação sobre ${exerciseName}`} placeholder="Uma observação, se quiser…" value={draft} onChange={(event) => {
     const next = event.target.value
     setDraft(next)
     window.clearTimeout(commitTimer.current)
@@ -642,7 +651,7 @@ function LocalizedNumberInput({ value, label, onCommit }: { value?: number; labe
     setInvalid(parsed === undefined)
     if (parsed !== undefined) { setRaw(formatLocalizedNumber(parsed)); onCommit(parsed) } else onCommit(undefined)
   }
-  return <span className="number-field"><input inputMode="decimal" aria-label={label} aria-invalid={invalid} value={raw} placeholder="—" onChange={(event) => { const next = event.target.value; const parsed = parseLocalizedNumber(next); setRaw(next); setInvalid(false); if (parsed !== undefined) onCommit(parsed); else if (!next.trim()) onCommit(undefined) }} onBlur={commit} /><small className="field-error">{invalid ? 'maior que 0' : ''}</small></span>
+  return <span className="number-field"><input inputMode="decimal" aria-label={label} aria-invalid={invalid} value={raw} placeholder="—" onChange={(event) => { const next = event.target.value; const parsed = parseLocalizedNumber(next); setRaw(next); setInvalid(false); if (parsed !== undefined) onCommit(parsed); else if (!next.trim()) onCommit(undefined) }} onBlur={commit} /><small className="field-error">{invalid ? 'Maior que 0' : ''}</small></span>
 }
 
 function formatTimer(value: number) {
@@ -735,8 +744,8 @@ function TimelinePage({ data, refresh, setNotice }: SharedProps) {
 
   return (
     <div className="page timeline-page">
-      <PageHeader eyebrow="só sua" title="minha linha" />
-      <div className="filter-row" role="tablist" aria-label="Ver registros da linha"><button role="tab" aria-selected={filter === 'all'} className={filter === 'all' ? 'selected' : ''} onClick={() => setFilter('all')}>tudo</button><button role="tab" aria-selected={filter === 'milestones'} className={filter === 'milestones' ? 'selected' : ''} onClick={() => setFilter('milestones')}>marcos</button><button role="tab" aria-selected={filter === 'media'} className={filter === 'media' ? 'selected' : ''} onClick={() => setFilter('media')}>mídia</button></div>
+      <PageHeader variant="timeline" eyebrow="Só sua" title="Minha linha" />
+      <div className="filter-row" role="tablist" aria-label="Ver registros da linha"><button role="tab" aria-selected={filter === 'all'} className={filter === 'all' ? 'selected' : ''} onClick={() => setFilter('all')}>Tudo</button><button role="tab" aria-selected={filter === 'milestones'} className={filter === 'milestones' ? 'selected' : ''} onClick={() => setFilter('milestones')}>Marcos</button><button role="tab" aria-selected={filter === 'media'} className={filter === 'media' ? 'selected' : ''} onClick={() => setFilter('media')}>Mídia</button></div>
       {filter === 'media' ? <TimelineMediaGallery items={media} entries={data.timeline} onOpen={setSelectedMediaId} /> : visible.length === 0 ? <SimpleEmpty icon={<NotebookPen />} title={filter === 'milestones' ? 'Nenhum marco ainda' : 'Sua linha começa aqui'} text={filter === 'milestones' ? 'Você escolhe o que merece ficar em destaque.' : 'Use o + para guardar notas e fotos na sua história.'} /> : (
         <div className="timeline-rail">
           {visible.map((entry) => <TimelineItem key={entry.id} entry={entry} onOpen={() => setSelectedEntryId(entry.id)} refresh={refresh} setNotice={setNotice} />)}
@@ -745,7 +754,7 @@ function TimelinePage({ data, refresh, setNotice }: SharedProps) {
       <FloatingAddButton tone="pink" label="Adicionar à linha" onClick={() => setComposer(true)} />
       <TimelineDetailDialog entry={selectedEntry} workout={selectedEntry?.sourceId ? data.workouts.find((workout) => workout.id === selectedEntry.sourceId) : undefined} loadUnit={data.profile.loadUnit} onClose={() => setSelectedEntryId(undefined)} />
       {selectedMediaId && <TimelineMediaViewer key={selectedMediaId} items={media} entries={data.timeline} activeId={selectedMediaId} onClose={() => setSelectedMediaId(undefined)} />}
-      {composer && <div className="sheet-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget && !photoBusy) setComposer(false) }}><form className="bottom-sheet composer" onSubmit={(event) => void saveEntry(event)}><div className="sheet-handle" /><header><div><h2>guardar na linha</h2><p className="composer-count">{imageDataUrls.length} de {MAX_TIMELINE_PHOTOS} fotos</p></div><button type="button" className="icon-button" aria-label="Fechar" disabled={photoBusy} onClick={() => setComposer(false)}><X /></button></header>{photoBusy && <div className="photo-processing" role="status">preparando foto {photoProgress.current} de {photoProgress.total}…</div>}{imageDataUrls.length > 0 && <div className={`composer-previews count-${imageDataUrls.length}`}>{imageDataUrls.map((source, index) => <div className="photo-ready" key={`${source.slice(-24)}-${index}`}><img className="composer-preview" src={source} alt={`Prévia da foto ${index + 1}`} onError={() => { setImageDataUrls((current) => current.filter((_, itemIndex) => itemIndex !== index)); setNotice('Uma foto não pôde ser exibida e foi removida.') }} /><button type="button" aria-label={`Remover foto ${index + 1}`} onClick={() => setImageDataUrls((current) => current.filter((_, itemIndex) => itemIndex !== index))}><X size={17} /></button></div>)}</div>}<textarea value={note} onChange={(event) => setNote(event.target.value)} placeholder="O que você quer lembrar?" aria-label="Anotação" /><div className="composer-actions"><label className={`secondary-button file-button ${imageDataUrls.length >= MAX_TIMELINE_PHOTOS ? 'disabled' : ''}`}><ImagePlus size={18} /> {imageDataUrls.length > 0 ? 'adicionar fotos' : 'escolher fotos'}<input type="file" multiple disabled={photoBusy || imageDataUrls.length >= MAX_TIMELINE_PHOTOS} accept="image/jpeg,image/png,image/webp,image/avif,image/heic,image/heif,image/heic-sequence,image/heif-sequence,.heic,.heif" onChange={(event) => void choosePhoto(event)} /></label><button className="primary-button" disabled={photoBusy || (!note.trim() && imageDataUrls.length === 0)}>guardar</button></div><p className="privacy-note"><Info size={15} /> Até 5 fotos, otimizadas e guardadas neste aparelho.</p></form></div>}
+      {composer && <div className="sheet-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget && !photoBusy) setComposer(false) }}><form className="bottom-sheet composer" onSubmit={(event) => void saveEntry(event)}><div className="sheet-handle" /><header><div><h2>Guardar na linha</h2><p className="composer-count">{imageDataUrls.length} de {MAX_TIMELINE_PHOTOS} fotos</p></div><button type="button" className="icon-button" aria-label="Fechar" disabled={photoBusy} onClick={() => setComposer(false)}><X /></button></header>{photoBusy && <div className="photo-processing" role="status">Preparando foto {photoProgress.current} de {photoProgress.total}…</div>}{imageDataUrls.length > 0 && <div className={`composer-previews count-${imageDataUrls.length}`}>{imageDataUrls.map((source, index) => <div className="photo-ready" key={`${source.slice(-24)}-${index}`}><img className="composer-preview" src={source} alt={`Prévia da foto ${index + 1}`} onError={() => { setImageDataUrls((current) => current.filter((_, itemIndex) => itemIndex !== index)); setNotice('Uma foto não pôde ser exibida e foi removida.') }} /><button type="button" aria-label={`Remover foto ${index + 1}`} onClick={() => setImageDataUrls((current) => current.filter((_, itemIndex) => itemIndex !== index))}><X size={17} /></button></div>)}</div>}<textarea value={note} onChange={(event) => setNote(event.target.value)} placeholder="O que você quer lembrar?" aria-label="Anotação" /><div className="composer-actions"><label className={`secondary-button file-button ${imageDataUrls.length >= MAX_TIMELINE_PHOTOS ? 'disabled' : ''}`}><ImagePlus size={18} /> {imageDataUrls.length > 0 ? 'Adicionar fotos' : 'Escolher fotos'}<input type="file" multiple disabled={photoBusy || imageDataUrls.length >= MAX_TIMELINE_PHOTOS} accept="image/jpeg,image/png,image/webp,image/avif,image/heic,image/heif,image/heic-sequence,image/heif-sequence,.heic,.heif" onChange={(event) => void choosePhoto(event)} /></label><button className="primary-button" disabled={photoBusy || (!note.trim() && imageDataUrls.length === 0)}>Guardar</button></div><p className="privacy-note"><Info size={15} /> Até 5 fotos, otimizadas e guardadas neste aparelho.</p></form></div>}
     </div>
   )
 }
@@ -761,15 +770,15 @@ function TimelineItem({ entry, onOpen, refresh, setNotice }: { entry: TimelineEn
       <div className="timeline-date"><strong>{formatDay(entry.occurredAt)}</strong><span>{formatTime(entry.occurredAt)}</span></div>
       <div className="timeline-content">
         <button className="timeline-open" onClick={onOpen} aria-label={`Abrir detalhes de ${entry.title}`}>
-          {entry.isMilestone && <span className="milestone-label"><Star size={14} fill="currentColor" /> meu marco</span>}
+          {entry.isMilestone && <span className="milestone-label"><Star size={14} fill="currentColor" /> Meu marco</span>}
           <h2>{entry.title}</h2>
           {entry.text && <p>{entry.text}</p>}
           {images.length > 0 && <TimelineMediaCollage images={images} text={entry.text} />}
-          <span className="open-detail-hint">ver detalhes <ChevronRight size={15} /></span>
+          <span className="open-detail-hint">Ver detalhes <ChevronRight size={15} /></span>
         </button>
-        <div className="entry-actions"><button onClick={() => void toggleMilestone()}><Star size={16} fill={entry.isMilestone ? 'currentColor' : 'none'} /> {entry.isMilestone ? 'desmarcar' : 'marcar'}</button><button onClick={() => setRemoveConfirm(true)}><Trash2 size={16} /> remover</button></div>
+        <div className="entry-actions"><button onClick={() => void toggleMilestone()}><Star size={16} fill={entry.isMilestone ? 'currentColor' : 'none'} /> {entry.isMilestone ? 'Desmarcar' : 'Marcar'}</button><button onClick={() => setRemoveConfirm(true)}><Trash2 size={16} /> Remover</button></div>
       </div>
-      <ConfirmDialog open={removeConfirm} title="remover da sua linha?" confirmLabel="remover registro" tone="danger" onClose={() => setRemoveConfirm(false)} onConfirm={() => void remove()}><p>Este registro será apagado deste aparelho.</p></ConfirmDialog>
+      <ConfirmDialog open={removeConfirm} title="Remover da sua linha?" confirmLabel="Remover registro" tone="danger" onClose={() => setRemoveConfirm(false)} onConfirm={() => void remove()}><p>Este registro será apagado deste aparelho.</p></ConfirmDialog>
     </article>
   )
 }
@@ -840,7 +849,7 @@ function TimelineMediaViewer({ items, entries, activeId, onClose }: { items: Ret
   const current = items[index] ?? items[0]
   const entry = entries.find((candidate) => candidate.id === current.entryId)
   return <div className="media-viewer-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose() }}><section className="media-viewer" role="dialog" aria-modal="true" aria-labelledby={titleId}>
-    <header><div><p className="eyebrow">{formatLongDate(current.occurredAt)}</p><h2 id={titleId}>foto em destaque</h2></div><button ref={closeButton} className="icon-button" aria-label="Fechar foto" onClick={onClose}><X /></button></header>
+    <header><div><p className="eyebrow">{formatLongDate(current.occurredAt)}</p><h2 id={titleId}>Foto em destaque</h2></div><button ref={closeButton} className="icon-button" aria-label="Fechar foto" onClick={onClose}><X /></button></header>
     <div className="media-viewer-photo"><TimelineImage source={current.source} alt={entry?.text ? `Foto: ${entry.text}` : 'Foto pessoal sem descrição'} /></div>
     <footer><button type="button" aria-label="Foto anterior" disabled={index === 0} onClick={() => setIndex((value) => Math.max(0, value - 1))}><ChevronLeft /></button><span aria-live="polite">{index + 1} de {items.length}</span><button type="button" aria-label="Próxima foto" disabled={index === items.length - 1} onClick={() => setIndex((value) => Math.min(items.length - 1, value + 1))}><ChevronRight /></button></footer>
   </section></div>
@@ -876,8 +885,8 @@ function TimelineDetailDialog({ entry, workout, loadUnit, onClose }: { entry?: T
   }, [entry?.id])
   if (!entry) return null
   const images = timelineImages(entry)
-  const kindLabel = entry.kind === 'workout' ? 'treino' : images.length > 0 ? `${images.length} ${images.length === 1 ? 'foto' : 'fotos'}` : 'nota'
-  return <div className="detail-dialog-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose() }}><section className="timeline-detail-dialog" role="dialog" aria-modal="true" aria-labelledby={titleId}><header><div><p className="eyebrow">{kindLabel} · {formatLongDate(entry.occurredAt)} · {formatTime(entry.occurredAt)}</p><h2 id={titleId}>{entry.title}</h2></div><button ref={closeButton} className="icon-button" aria-label="Fechar detalhes" onClick={onClose}><X /></button></header>{entry.isMilestone && <p className="milestone-label"><Star size={14} fill="currentColor" /> meu marco</p>}{entry.text && <p className="timeline-detail-text">{entry.text}</p>}{images.length > 0 && <TimelineRecordMedia key={entry.id} images={images} text={entry.text} />}{workout && <div className="timeline-workout-detail"><p className="timeline-workout-summary">{workoutDurationMinutes(workout)} min · {workout.items.length} {workout.items.length === 1 ? 'atividade' : 'atividades'}{workout.feeling ? ` · ${workout.feeling}` : ''}</p>{workout.items.map((item) => <section key={item.id}><h3>{item.exerciseName}</h3><p>{item.sets.filter((set) => set.completed).map((set) => formatSetSummary(set, item.metrics ?? defaultMetricsForMode(item.metricMode), loadUnit)).join(' · ') || 'Sem registros concluídos'}</p>{item.note && <small>{item.note}</small>}</section>)}</div>}</section></div>
+  const kindLabel = entry.kind === 'workout' ? 'Treino' : images.length > 0 ? `${images.length} ${images.length === 1 ? 'foto' : 'fotos'}` : 'Nota'
+  return <div className="detail-dialog-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose() }}><section className="timeline-detail-dialog" role="dialog" aria-modal="true" aria-labelledby={titleId}><header><div><p className="eyebrow">{kindLabel} · {formatLongDate(entry.occurredAt)} · {formatTime(entry.occurredAt)}</p><h2 id={titleId}>{entry.title}</h2></div><button ref={closeButton} className="icon-button" aria-label="Fechar detalhes" onClick={onClose}><X /></button></header>{entry.isMilestone && <p className="milestone-label"><Star size={14} fill="currentColor" /> Meu marco</p>}{entry.text && <p className="timeline-detail-text">{entry.text}</p>}{images.length > 0 && <TimelineRecordMedia key={entry.id} images={images} text={entry.text} />}{workout && <div className="timeline-workout-detail"><p className="timeline-workout-summary">{workoutDurationMinutes(workout)} min · {workout.items.length} {workout.items.length === 1 ? 'atividade' : 'atividades'}{workout.feeling ? ` · ${workout.feeling}` : ''}</p>{workout.items.map((item) => <section key={item.id}><h3>{item.exerciseName}</h3><p>{item.sets.filter((set) => set.completed).map((set) => formatSetSummary(set, item.metrics ?? defaultMetricsForMode(item.metricMode), loadUnit)).join(' · ') || 'Sem registros concluídos'}</p>{item.note && <small>{item.note}</small>}</section>)}</div>}</section></div>
 }
 
 function ExercisesPage({ data, refresh, setNotice, allExercises, allTemplates }: SharedProps) {
@@ -900,14 +909,14 @@ function ExercisesPage({ data, refresh, setNotice, allExercises, allTemplates }:
   }, [creating, creatingTemplate])
   return (
     <div className="page exercises-page">
-      <PageHeader eyebrow="para consultar e preparar" title="biblioteca" />
-      <div className="library-tabs" role="tablist" aria-label="Conteúdo da biblioteca"><button role="tab" aria-selected={librarySection === 'exercises'} className={librarySection === 'exercises' ? 'selected' : ''} onClick={() => setLibrarySection('exercises')}>exercícios <small>{allExercises.length}</small></button><button role="tab" aria-selected={librarySection === 'templates'} className={librarySection === 'templates' ? 'selected' : ''} onClick={() => setLibrarySection('templates')}>modelos <small>{allTemplates.length}</small></button></div>
+      <PageHeader variant="library" eyebrow="Para consultar e preparar" title="Biblioteca" />
+      <div className="library-tabs" role="tablist" aria-label="Conteúdo da biblioteca"><button role="tab" aria-selected={librarySection === 'exercises'} className={librarySection === 'exercises' ? 'selected' : ''} onClick={() => setLibrarySection('exercises')}>Exercícios <small>{allExercises.length}</small></button><button role="tab" aria-selected={librarySection === 'templates'} className={librarySection === 'templates' ? 'selected' : ''} onClick={() => setLibrarySection('templates')}>Modelos <small>{allTemplates.length}</small></button></div>
       {librarySection === 'exercises' ? <>
-        <label className="search-field prominent"><Search size={19} /><input placeholder="buscar pelo nome" value={query} onChange={(event) => setQuery(event.target.value)} /></label>
-        <div className="filter-row scrollable">{exerciseGroups.map((value) => <button key={value} className={group === value ? 'selected' : ''} onClick={() => setGroup(value)}>{value.toLocaleLowerCase()}</button>)}</div>
+        <label className="search-field prominent"><Search size={19} /><input placeholder="Buscar pelo nome" value={query} onChange={(event) => setQuery(event.target.value)} /></label>
+        <div className="filter-row scrollable">{exerciseGroups.map((value) => <button key={value} className={group === value ? 'selected' : ''} onClick={() => setGroup(value)}>{value}</button>)}</div>
         <p className="result-count">{filtered.length} {filtered.length === 1 ? 'exercício' : 'exercícios'}</p>
         <div className="exercise-list">{filtered.map((exercise) => <div className="exercise-list-row" key={exercise.id}><NavLink to={`/exercicios/${exercise.id}`}><ExerciseArtwork exercise={exercise} compact /><span><strong>{exercise.name}</strong><small>{exercise.group} · {exercise.equipment}{exercise.origin === 'custom' ? ' · pessoal' : ''}</small></span></NavLink><button className="icon-button small" aria-label={data.favorites.includes(exercise.id) ? `Desfavoritar ${exercise.name}` : `Favoritar ${exercise.name}`} onClick={() => void toggleFavorite(exercise.id)}><Heart size={19} fill={data.favorites.includes(exercise.id) ? 'currentColor' : 'none'} /></button></div>)}</div>
-      </> : <div className="template-library"><p className="library-note">Modelos apenas preparam o treino. Você pode trocar ou remover qualquer exercício.</p>{allTemplates.map((template) => <article className="template-row" key={template.id}><span className="template-thread" /><div><p>{template.origin === 'custom' ? 'modelo pessoal' : 'modelo do app'}</p><h2>{template.name}</h2><small>{template.note}</small><div className="template-exercises">{template.exerciseIds.slice(0, 4).map((id) => <span key={id}>{allExercises.find((exercise) => exercise.id === id)?.name ?? 'Exercício removido'}</span>)}{template.exerciseIds.length > 4 && <span>+{template.exerciseIds.length - 4}</span>}</div></div></article>)}</div>}
+      </> : <div className="template-library"><p className="library-note">Modelos apenas preparam o treino. Você pode trocar ou remover qualquer exercício.</p>{allTemplates.map((template) => <article className="template-row" key={template.id}><span className="template-thread" /><div><p>{template.origin === 'custom' ? 'Modelo pessoal' : 'Modelo do app'}</p><h2>{template.name}</h2><small>{template.note}</small><div className="template-exercises">{template.exerciseIds.slice(0, 4).map((id) => <span key={id}>{allExercises.find((exercise) => exercise.id === id)?.name ?? 'Exercício removido'}</span>)}{template.exerciseIds.length > 4 && <span>+{template.exerciseIds.length - 4}</span>}</div></div></article>)}</div>}
       <FloatingAddButton tone="blue" label={librarySection === 'exercises' ? 'Criar exercício pessoal' : 'Criar modelo de treino'} onClick={() => librarySection === 'exercises' ? setCreating(true) : setCreatingTemplate(true)} />
       {creating && <CustomExerciseSheet onClose={() => setCreating(false)} onSaved={async () => { await refresh(); setCreating(false); setNotice('Exercício pessoal criado.') }} />}
       {creatingTemplate && <TemplateSheet exercises={allExercises} onClose={() => setCreatingTemplate(false)} onSaved={async () => { await refresh(); setCreatingTemplate(false); setNotice('Modelo pessoal criado.') }} />}
@@ -926,12 +935,12 @@ function CustomExerciseSheet({ onClose, onSaved }: { onClose: () => void; onSave
   }
   return <div className="sheet-backdrop"><form className="bottom-sheet" onSubmit={(event) => void submit(event)}>
     <div className="sheet-handle" />
-    <header><h2>novo exercício</h2><button type="button" className="icon-button" aria-label="Fechar" onClick={onClose}><X /></button></header>
-    <label className="field"><span>nome</span><input value={name} onChange={(event) => setName(event.target.value)} placeholder="ex.: passada no step" /></label>
-    <label className="field"><span>tipo</span><select value={category} onChange={(event) => { const next = event.target.value as ActivityCategory; setCategory(next); setMetricMode(next === 'strength' ? 'load-reps' : 'time-only') }}><option value="strength">Musculação</option><option value="cardio">Cardio</option><option value="other">Outra atividade</option></select></label>
-    <label className="field"><span>como registrar</span><select value={metricMode} onChange={(event) => setMetricMode(event.target.value as MetricMode)}>{category === 'strength' ? <><option value="load-reps">Carga e repetições</option><option value="reps-only">Somente repetições</option><option value="time-only">Somente tempo</option></> : <><option value="distance-time">Distância e tempo</option><option value="time-only">Somente tempo</option></>}</select></label>
-    <label className="field"><span>grupo principal</span><select value={group} onChange={(event) => setGroup(event.target.value)}>{exerciseGroups.filter((value) => value !== 'Todos').map((value) => <option key={value}>{value}</option>)}</select></label>
-    <button className="primary-button wide" disabled={!name.trim()}>criar exercício</button>
+    <header><h2>Novo exercício</h2><button type="button" className="icon-button" aria-label="Fechar" onClick={onClose}><X /></button></header>
+    <label className="field"><span>Nome</span><input value={name} onChange={(event) => setName(event.target.value)} placeholder="Ex.: passada no step" /></label>
+    <label className="field"><span>Tipo</span><select value={category} onChange={(event) => { const next = event.target.value as ActivityCategory; setCategory(next); setMetricMode(next === 'strength' ? 'load-reps' : 'time-only') }}><option value="strength">Musculação</option><option value="cardio">Cardio</option><option value="other">Outra atividade</option></select></label>
+    <label className="field"><span>Como registrar</span><select value={metricMode} onChange={(event) => setMetricMode(event.target.value as MetricMode)}>{category === 'strength' ? <><option value="load-reps">Carga e repetições</option><option value="reps-only">Somente repetições</option><option value="time-only">Somente tempo</option></> : <><option value="distance-time">Distância e tempo</option><option value="time-only">Somente tempo</option></>}</select></label>
+    <label className="field"><span>Grupo principal</span><select value={group} onChange={(event) => setGroup(event.target.value)}>{exerciseGroups.filter((value) => value !== 'Todos').map((value) => <option key={value}>{value}</option>)}</select></label>
+    <button className="primary-button wide" disabled={!name.trim()}>Criar exercício</button>
   </form></div>
 }
 
@@ -947,12 +956,12 @@ function TemplateSheet({ exercises, onClose, onSaved }: { exercises: Exercise[];
   }
   return <div className="sheet-backdrop"><form className="bottom-sheet template-sheet" onSubmit={(event) => void submit(event)}>
     <div className="sheet-handle" />
-    <header><h2>novo modelo</h2><button type="button" className="icon-button" aria-label="Fechar" onClick={onClose}><X /></button></header>
-    <label className="field"><span>nome do modelo</span><input value={name} onChange={(event) => setName(event.target.value)} placeholder="ex.: pernas de terça" /></label>
-    <label className="search-field"><Search size={18} /><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="buscar para adicionar" /></label>
+    <header><h2>Novo modelo</h2><button type="button" className="icon-button" aria-label="Fechar" onClick={onClose}><X /></button></header>
+    <label className="field"><span>Nome do modelo</span><input value={name} onChange={(event) => setName(event.target.value)} placeholder="Ex.: pernas de terça" /></label>
+    <label className="search-field"><Search size={18} /><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Buscar para adicionar" /></label>
     <p className="selection-count">{selected.length} selecionado{selected.length === 1 ? '' : 's'}</p>
     <div className="template-pick-list">{available.map((exercise) => <label key={exercise.id}><input type="checkbox" checked={selected.includes(exercise.id)} onChange={() => toggle(exercise.id)} /><ExerciseArtwork exercise={exercise} compact /><span>{exercise.name}</span><Check size={17} /></label>)}</div>
-    <button className="primary-button wide" disabled={!name.trim() || selected.length === 0}>guardar modelo</button>
+    <button className="primary-button wide" disabled={!name.trim() || selected.length === 0}>Guardar modelo</button>
   </form></div>
 }
 
@@ -970,25 +979,25 @@ function ExerciseDetail({ allExercises, data, refresh }: { allExercises: Exercis
       <h1>{exercise.name}</h1>
       <div className={`detail-illustration${exercise.media ? ' has-media' : ''}`}>
         <ExerciseArtwork exercise={exercise} />
-        <small>{exercise.media ? 'início e execução' : 'movimento resumido'}</small>
+        <small>{exercise.media ? 'Início e execução' : 'Movimento resumido'}</small>
       </div>
       {exercise.curation && (
         <section className="exercise-facts" aria-labelledby="exercise-facts-title">
           <div className="exercise-facts-heading">
-            <div><p className="eyebrow">um olhar rápido</p><h2 id="exercise-facts-title">sobre o exercício</h2></div>
-            {exercise.curation.reviewStatus === 'em-revisao' && <small>conteúdo em revisão</small>}
+            <div><p className="eyebrow">Um olhar rápido</p><h2 id="exercise-facts-title">Sobre o exercício</h2></div>
+            {exercise.curation.reviewStatus === 'em-revisao' && <small>Conteúdo em revisão</small>}
           </div>
           <dl>
-            <div><dt>alvo principal</dt><dd>{exercise.curation.primaryMuscles.join(', ')}</dd></div>
-            <div><dt>também trabalha</dt><dd>{exercise.curation.secondaryMuscles.join(', ')}</dd></div>
-            <div><dt>padrão</dt><dd>{exercise.curation.movementPattern}</dd></div>
-            {exercise.curation.suggestedRepRange && <div><dt>faixa de referência</dt><dd>{exercise.curation.suggestedRepRange.minimum}–{exercise.curation.suggestedRepRange.maximum} repetições</dd></div>}
-            {exercise.curation.stimulusToFatigue && <div><dt>estímulo × fadiga</dt><dd>{exercise.curation.stimulusToFatigue}</dd></div>}
+            <div><dt>Alvo principal</dt><dd>{exercise.curation.primaryMuscles.join(', ')}</dd></div>
+            <div><dt>Também trabalha</dt><dd>{exercise.curation.secondaryMuscles.join(', ')}</dd></div>
+            <div><dt>Padrão</dt><dd>{exercise.curation.movementPattern}</dd></div>
+            {exercise.curation.suggestedRepRange && <div><dt>Faixa de referência</dt><dd>{exercise.curation.suggestedRepRange.minimum}–{exercise.curation.suggestedRepRange.maximum} repetições</dd></div>}
+            {exercise.curation.stimulusToFatigue && <div><dt>Estímulo × fadiga</dt><dd>{sentenceCase(exercise.curation.stimulusToFatigue)}</dd></div>}
           </dl>
         </section>
       )}
       <section>
-        <p className="eyebrow">um passo de cada vez</p>
+        <p className="eyebrow">Um passo de cada vez</p>
         <ol className="instruction-list">{exercise.instructions.map((instruction, index) => <li key={instruction}><span>{index + 1}</span><p>{instruction}</p></li>)}</ol>
       </section>
       <aside className="care-note"><Info size={18} /><p>A demonstração ajuda a reconhecer o movimento, mas não mostra todos os ajustes. Use como referência geral; ela não substitui orientação profissional.</p></aside>
@@ -1004,7 +1013,7 @@ function EvolutionPage({ data, allExercises }: { data: AppSnapshot; allExercises
   const points = exerciseProgress(data.workouts, selected)
   const maxValue = Math.max(...points.map((point) => point.value), 1)
   const selectedName = allExercises.find((exercise) => exercise.id === selected)?.name
-  return <div className="page evolution-page"><PageHeader eyebrow="sem pressa" title="evolução" /><section className="month-summary"><p>neste mês</p><strong>{thisMonthCount(data.workouts)}</strong><span>treinos que você guardou</span><i /></section><div className="stat-strip"><div><strong>{completed.length}</strong><span>treinos no total</span></div><div><strong>{totalCompletedSets(data.workouts)}</strong><span>registros concluídos</span></div></div><section className="progress-section"><div className="section-heading"><div><p className="eyebrow">carga por sessão</p><h2>um exercício</h2></div></div>{usedExercises.length === 0 ? <div className="empty-gentle"><BarChart3 size={22} /><p>Registre alguns treinos para enxergar mudanças por aqui.</p></div> : <><label className="field compact"><span>exercício</span><select value={selected} onChange={(event) => setSelected(event.target.value)}>{usedExercises.map((id) => <option key={id} value={id}>{allExercises.find((exercise) => exercise.id === id)?.name ?? id}</option>)}</select></label>{points.length === 0 ? <p className="chart-summary">Ainda não há cargas concluídas para este exercício.</p> : <><div className="mini-chart" role="img" aria-label={`Evolução da carga em ${selectedName}: ${points.map((point) => `${point.value} ${data.profile.loadUnit} em ${formatDay(point.date)}`).join(', ')}`}><span className="chart-max">{maxValue} {data.profile.loadUnit}</span><div className="chart-bars">{points.slice(-8).map((point) => <div key={point.date} style={{ height: `${Math.max(12, point.value / maxValue * 100)}%` }}><span>{point.value}</span></div>)}</div></div><p className="chart-summary">Maior carga registrada em {selectedName}: <strong>{maxValue} {data.profile.loadUnit}</strong>.</p></>}</>}</section><p className="little-note"><span>✦</span> evolução também é voltar, ajustar e continuar</p></div>
+  return <div className="page evolution-page"><PageHeader variant="evolution" eyebrow="Sem pressa" title="Evolução" /><section className="month-summary"><p>Neste mês</p><strong>{thisMonthCount(data.workouts)}</strong><span>Treinos que você guardou</span><i /></section><div className="stat-strip"><div><strong>{completed.length}</strong><span>Treinos no total</span></div><div><strong>{totalCompletedSets(data.workouts)}</strong><span>Registros concluídos</span></div></div><section className="progress-section"><div className="section-heading"><div><p className="eyebrow">Carga por sessão</p><h2>Um exercício</h2></div></div>{usedExercises.length === 0 ? <div className="empty-gentle"><BarChart3 size={22} /><p>Registre alguns treinos para enxergar mudanças por aqui.</p></div> : <><label className="field compact"><span>Exercício</span><select value={selected} onChange={(event) => setSelected(event.target.value)}>{usedExercises.map((id) => <option key={id} value={id}>{allExercises.find((exercise) => exercise.id === id)?.name ?? id}</option>)}</select></label>{points.length === 0 ? <p className="chart-summary">Ainda não há cargas concluídas para este exercício.</p> : <><div className="mini-chart" role="img" aria-label={`Evolução da carga em ${selectedName}: ${points.map((point) => `${point.value} ${data.profile.loadUnit} em ${formatDay(point.date)}`).join(', ')}`}><span className="chart-max">{maxValue} {data.profile.loadUnit}</span><div className="chart-bars">{points.slice(-8).map((point) => <div key={point.date} style={{ height: `${Math.max(12, point.value / maxValue * 100)}%` }}><span>{point.value}</span></div>)}</div></div><p className="chart-summary">Maior carga registrada em {selectedName}: <strong>{maxValue} {data.profile.loadUnit}</strong>.</p></>}</>}</section><p className="little-note"><span>✦</span> Evolução também é voltar, ajustar e continuar</p></div>
 }
 
 function ProfilePage({ data, refresh, setNotice, installExperience }: SharedProps) {
@@ -1089,51 +1098,51 @@ function ProfilePage({ data, refresh, setNotice, installExperience }: SharedProp
   const avatarSource = profileAvatarSource(profile.avatar, import.meta.env.BASE_URL)
   return <>
     <div className="page profile-page">
-      <PageHeader eyebrow="seu espaço" title="eu" />
+      <PageHeader variant="profile" eyebrow="Seu espaço" title="Eu" />
       <section className="profile-intro">
         <button className="avatar-soft" aria-label="Escolher avatar do perfil" onClick={() => setAvatarPickerOpen(true)}>{avatarSource ? <img src={avatarSource} alt="Avatar escolhido" /> : <UserRound />}<span className="avatar-edit" aria-hidden="true"><PencilLine size={13} /></span></button>
-        <label><span>como quer ser chamada?</span><input value={profile.nickname} placeholder="seu apelido" onBlur={() => void persistProfile(profile)} onChange={(event) => setLocalProfile({ ...profile, nickname: event.target.value })} /></label>
+        <label><span>Como quer ser chamada?</span><input value={profile.nickname} placeholder="Seu apelido" onBlur={() => void persistProfile(profile)} onChange={(event) => setLocalProfile({ ...profile, nickname: event.target.value })} /></label>
       </section>
       <section className="settings-section">
-        <h2>preferências</h2>
-        <div className="setting-row"><span><strong>unidade de carga</strong><small>usada nos próximos registros</small></span><div className="segmented small"><button className={profile.loadUnit === 'kg' ? 'selected' : ''} onClick={() => void persistProfile({ ...profile, loadUnit: 'kg' })}>kg</button><button className={profile.loadUnit === 'lb' ? 'selected' : ''} onClick={() => void persistProfile({ ...profile, loadUnit: 'lb' })}>lb</button></div></div>
-        <div className="setting-row"><span><strong>peso na linha</strong><small>permite registros de peso corporal</small></span><button className={profile.bodyWeightEnabled ? 'switch on' : 'switch'} role="switch" aria-label="Permitir peso corporal na linha" aria-checked={profile.bodyWeightEnabled} onClick={() => void persistProfile({ ...profile, bodyWeightEnabled: !profile.bodyWeightEnabled })}><i /></button></div>
+        <h2>Preferências</h2>
+        <div className="setting-row"><span><strong>Unidade de carga</strong><small>Usada nos próximos registros</small></span><div className="segmented small"><button className={profile.loadUnit === 'kg' ? 'selected' : ''} onClick={() => void persistProfile({ ...profile, loadUnit: 'kg' })}>kg</button><button className={profile.loadUnit === 'lb' ? 'selected' : ''} onClick={() => void persistProfile({ ...profile, loadUnit: 'lb' })}>lb</button></div></div>
+        <div className="setting-row"><span><strong>Peso na linha</strong><small>Permite registros de peso corporal</small></span><button className={profile.bodyWeightEnabled ? 'switch on' : 'switch'} role="switch" aria-label="Permitir peso corporal na linha" aria-checked={profile.bodyWeightEnabled} onClick={() => void persistProfile({ ...profile, bodyWeightEnabled: !profile.bodyWeightEnabled })}><i /></button></div>
       </section>
       <details className="health-details">
-        <summary><span><strong>corpo e contexto de saúde</strong><small>tudo opcional</small></span><ChevronRight size={19} /></summary>
+        <summary><span><strong>Corpo e contexto de saúde</strong><small>Tudo opcional</small></span><ChevronRight size={19} /></summary>
         <div className="health-fields">
           <p className="sensitive-note"><Info size={16} /> Estes dados ficam no aparelho e ainda não mudam sugestões do app.</p>
-          <div className="profile-number-grid"><label><span>peso ({profile.loadUnit})</span><LocalizedNumberInput value={displayWeight} label={`Peso corporal em ${profile.loadUnit}`} onCommit={(value) => void persistProfile({ ...profile, bodyWeightKg: value === undefined ? undefined : profile.loadUnit === 'kg' ? value : lbToKg(value) })} /></label><label><span>altura (cm)</span><LocalizedNumberInput value={profile.heightCm} label="Altura em centímetros" onCommit={(value) => void persistProfile({ ...profile, heightCm: value })} /></label></div>
-          <div className="setting-row"><span><strong>mostrar IMC</strong><small>calculado só com peso e altura</small></span><button className={profile.showBmi ? 'switch on' : 'switch'} role="switch" aria-label="Mostrar IMC" aria-checked={Boolean(profile.showBmi)} onClick={() => void persistProfile({ ...profile, showBmi: !profile.showBmi })}><i /></button></div>
-          {profile.showBmi && <div className="bmi-line"><span>IMC</span><strong>{bmi === undefined ? 'preencha peso e altura' : formatLocalizedNumber(bmi)}</strong><small>Informativo, sem classificação ou diagnóstico.</small></div>}
-          <label className="profile-number-field"><span>duração média do ciclo (dias)</span><LocalizedNumberInput value={profile.menstrualCycleDays} label="Duração média do ciclo menstrual em dias" onCommit={(value) => void persistProfile({ ...profile, menstrualCycleDays: value })} /></label>
-          <label className="field"><span>gravidez</span><select value={profile.pregnancyStatus ?? ''} onChange={(event) => void persistProfile({ ...profile, pregnancyStatus: event.target.value ? event.target.value as Profile['pregnancyStatus'] : undefined })}><option value="">Prefiro não informar</option><option value="pregnant">Estou grávida</option><option value="not-pregnant">Não estou grávida</option></select></label>
+          <div className="profile-number-grid"><label><span>Peso ({profile.loadUnit})</span><LocalizedNumberInput value={displayWeight} label={`Peso corporal em ${profile.loadUnit}`} onCommit={(value) => void persistProfile({ ...profile, bodyWeightKg: value === undefined ? undefined : profile.loadUnit === 'kg' ? value : lbToKg(value) })} /></label><label><span>Altura (cm)</span><LocalizedNumberInput value={profile.heightCm} label="Altura em centímetros" onCommit={(value) => void persistProfile({ ...profile, heightCm: value })} /></label></div>
+          <div className="setting-row"><span><strong>Mostrar IMC</strong><small>Calculado só com peso e altura</small></span><button className={profile.showBmi ? 'switch on' : 'switch'} role="switch" aria-label="Mostrar IMC" aria-checked={Boolean(profile.showBmi)} onClick={() => void persistProfile({ ...profile, showBmi: !profile.showBmi })}><i /></button></div>
+          {profile.showBmi && <div className="bmi-line"><span>IMC</span><strong>{bmi === undefined ? 'Preencha peso e altura' : formatLocalizedNumber(bmi)}</strong><small>Informativo, sem classificação ou diagnóstico.</small></div>}
+          <label className="profile-number-field"><span>Duração média do ciclo (dias)</span><LocalizedNumberInput value={profile.menstrualCycleDays} label="Duração média do ciclo menstrual em dias" onCommit={(value) => void persistProfile({ ...profile, menstrualCycleDays: value })} /></label>
+          <label className="field"><span>Gravidez</span><select value={profile.pregnancyStatus ?? ''} onChange={(event) => void persistProfile({ ...profile, pregnancyStatus: event.target.value ? event.target.value as Profile['pregnancyStatus'] : undefined })}><option value="">Prefiro não informar</option><option value="pregnant">Estou grávida</option><option value="not-pregnant">Não estou grávida</option></select></label>
         </div>
       </details>
       <section className="device-section">
-        <p className="eyebrow">neste dispositivo</p><h2>abrir como aplicativo</h2>
+        <p className="eyebrow">Neste dispositivo</p><h2>Abrir como aplicativo</h2>
         <p>Instalada, a Brabita ganha ícone próprio e continua pronta para os treinos já carregados mesmo sem conexão.</p>
-        {installExperience.installed ? <div className="install-device-row installed"><span className="install-device-icon"><Check size={19} /></span><span><strong>Brabita instalada</strong><small>você já está usando a versão em aplicativo</small></span></div> : <button className="data-action" disabled={installActionBusy} onClick={() => void requestInstall()}><Smartphone /><span><strong>{installExperience.promptAvailable ? 'instalar Brabita' : 'como instalar a Brabita'}</strong><small>{installExperience.promptAvailable ? 'abre a confirmação segura do navegador' : 'opção manual para este navegador'}</small></span><ChevronRight /></button>}
-        {!installExperience.installed && installHelpOpen && <div className="manual-install-help" role="status"><strong>instalação pelo navegador</strong><ol>{installSteps.map((step) => <li key={step}>{step}</li>)}</ol><p>O navegador sempre pede sua confirmação; nenhum site consegue instalar um aplicativo sem ela.</p><button type="button" onClick={() => setInstallHelpOpen(false)}>entendi</button></div>}
+        {installExperience.installed ? <div className="install-device-row installed"><span className="install-device-icon"><Check size={19} /></span><span><strong>Brabita instalada</strong><small>Você já está usando a versão em aplicativo</small></span></div> : <button className="data-action" disabled={installActionBusy} onClick={() => void requestInstall()}><Smartphone /><span><strong>{installExperience.promptAvailable ? 'Instalar Brabita' : 'Como instalar a Brabita'}</strong><small>{installExperience.promptAvailable ? 'Abre a confirmação segura do navegador' : 'Opção manual para este navegador'}</small></span><ChevronRight /></button>}
+        {!installExperience.installed && installHelpOpen && <div className="manual-install-help" role="status"><strong>Instalação pelo navegador</strong><ol>{installSteps.map((step) => <li key={step}>{step}</li>)}</ol><p>O navegador sempre pede sua confirmação; nenhum site consegue instalar um aplicativo sem ela.</p><button type="button" onClick={() => setInstallHelpOpen(false)}>Entendi</button></div>}
       </section>
       <section className="account-section">
-        <p className="eyebrow">sua conta</p><h2>acesso ao diário</h2>
+        <p className="eyebrow">Sua conta</p><h2>Acesso ao diário</h2>
         <div className="account-summary"><ShieldCheck size={21} /><span><strong>{user?.displayName || profile.nickname || 'Sua conta Brabita'}</strong><small>{user?.email ?? 'Conta conectada'} · e-mail confirmado</small></span></div>
-        <button className="data-action" onClick={() => void signOutAccount()}><LogOut /><span><strong>sair desta conta</strong><small>seus dados permanecem guardados neste aparelho</small></span><ChevronRight /></button>
-        <button className="danger-action" onClick={() => setAccountDeleteConfirm(true)}><Trash2 size={18} /> excluir minha conta</button>
+        <button className="data-action" onClick={() => void signOutAccount()}><LogOut /><span><strong>Sair desta conta</strong><small>Seus dados permanecem guardados neste aparelho</small></span><ChevronRight /></button>
+        <button className="danger-action" onClick={() => setAccountDeleteConfirm(true)}><Trash2 size={18} /> Excluir minha conta</button>
       </section>
       <section className="data-section">
-        <p className="eyebrow">seus dados</p><h2>ficam neste aparelho</h2><p>Seu diário é separado pela conta conectada. Faça um backup para levar sua história com você ou recuperar depois.</p>
-        <button className="data-action" onClick={() => void exportData()}><Download /><span><strong>baixar backup</strong><small>treinos, notas, fotos, modelos e preferências</small></span><ChevronRight /></button>
-        <button className="data-action" onClick={() => fileRef.current?.click()}><Upload /><span><strong>restaurar backup</strong><small>substitui os dados deste aparelho</small></span><ChevronRight /></button>
+        <p className="eyebrow">Seus dados</p><h2>Ficam neste aparelho</h2><p>Seu diário é separado pela conta conectada. Faça um backup para levar sua história com você ou recuperar depois.</p>
+        <button className="data-action" onClick={() => void exportData()}><Download /><span><strong>Baixar backup</strong><small>Treinos, notas, fotos, modelos e preferências</small></span><ChevronRight /></button>
+        <button className="data-action" onClick={() => fileRef.current?.click()}><Upload /><span><strong>Restaurar backup</strong><small>Substitui os dados deste aparelho</small></span><ChevronRight /></button>
         <input ref={fileRef} hidden type="file" accept="application/json" onChange={(event) => void importData(event)} />
-        <button className="danger-action" onClick={() => setEraseConfirm(true)}><Trash2 size={18} /> apagar todos os dados</button>
+        <button className="danger-action" onClick={() => setEraseConfirm(true)}><Trash2 size={18} /> Apagar todos os dados</button>
       </section>
       <footer className="app-footer"><img className="brand-logo small" src={BRAND_ICON_URL} alt="" /><p><strong className="brand-name">Brabita</strong> · versão {CURRENT_RELEASE.version}</p></footer>
     </div>
-    <ConfirmDialog open={Boolean(pendingBackup)} title="restaurar este backup?" confirmLabel="restaurar backup" onClose={() => setPendingBackup(undefined)} onConfirm={() => void restoreBackup()} busy={dataActionBusy}><p>Os dados atuais deste aparelho serão substituídos pelo conteúdo do arquivo.</p></ConfirmDialog>
-    <ConfirmDialog open={eraseConfirm} title="apagar todos os dados?" confirmLabel="apagar tudo" tone="danger" onClose={() => setEraseConfirm(false)} onConfirm={() => void erase()} busy={dataActionBusy}><p>Treinos, fotos, notas, modelos e preferências serão removidos deste aparelho. Esta ação não pode ser desfeita.</p></ConfirmDialog>
-    <ConfirmDialog open={accountDeleteConfirm} title="excluir sua conta?" confirmLabel="excluir conta" tone="danger" onClose={() => setAccountDeleteConfirm(false)} onConfirm={() => {
+    <ConfirmDialog open={Boolean(pendingBackup)} title="Restaurar este backup?" confirmLabel="Restaurar backup" onClose={() => setPendingBackup(undefined)} onConfirm={() => void restoreBackup()} busy={dataActionBusy}><p>Os dados atuais deste aparelho serão substituídos pelo conteúdo do arquivo.</p></ConfirmDialog>
+    <ConfirmDialog open={eraseConfirm} title="Apagar todos os dados?" confirmLabel="Apagar tudo" tone="danger" onClose={() => setEraseConfirm(false)} onConfirm={() => void erase()} busy={dataActionBusy}><p>Treinos, fotos, notas, modelos e preferências serão removidos deste aparelho. Esta ação não pode ser desfeita.</p></ConfirmDialog>
+    <ConfirmDialog open={accountDeleteConfirm} title="Excluir sua conta?" confirmLabel="Excluir conta" tone="danger" onClose={() => setAccountDeleteConfirm(false)} onConfirm={() => {
       setDataActionBusy(true)
       void deleteAccount().catch((error) => {
         setDataActionBusy(false)
@@ -1206,10 +1215,10 @@ function AvatarPickerSheet({ current, onClose, onChoose, setNotice }: { current?
     }
   }} processing={processing} />
 
-  return <div className="sheet-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget && !processing) onClose() }}><section className="bottom-sheet avatar-picker-sheet" role="dialog" aria-modal="true" aria-labelledby={titleId}><div className="sheet-handle" /><header><div><p className="eyebrow">do seu jeito</p><h2 id={titleId}>escolher avatar</h2></div><button ref={closeButton} className="icon-button" aria-label="Fechar escolha de avatar" disabled={processing} onClick={onClose}><X /></button></header><p className="avatar-picker-copy">Escolha uma personagem ou use uma foto sua. Você pode trocar quando quiser.</p><div className="avatar-preset-grid" role="group" aria-label="Personagens disponíveis">{avatarPresets.map((preset) => {
+  return <div className="sheet-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget && !processing) onClose() }}><section className="bottom-sheet avatar-picker-sheet" role="dialog" aria-modal="true" aria-labelledby={titleId}><div className="sheet-handle" /><header><div><p className="eyebrow">Do seu jeito</p><h2 id={titleId}>Escolher avatar</h2></div><button ref={closeButton} className="icon-button" aria-label="Fechar escolha de avatar" disabled={processing} onClick={onClose}><X /></button></header><p className="avatar-picker-copy">Escolha uma personagem ou use uma foto sua. Você pode trocar quando quiser.</p><div className="avatar-preset-grid" role="group" aria-label="Personagens disponíveis">{avatarPresets.map((preset) => {
     const selected = current?.type === 'preset' && current.presetId === preset.id
     return <button type="button" key={preset.id} className={selected ? 'selected' : ''} aria-pressed={selected} disabled={processing} onClick={() => void chooseAvatar({ type: 'preset', presetId: preset.id })}><img src={`${import.meta.env.BASE_URL}${preset.file}`} alt="" /><span>{preset.label}</span>{selected && <i aria-hidden="true"><Check size={15} /></i>}</button>
-  })}</div><button className="avatar-upload-action" disabled={processing} onClick={() => fileRef.current?.click()}><Camera size={19} /><span><strong>{processing ? 'preparando foto…' : 'usar uma foto minha'}</strong><small>ajustar posição e zoom antes de salvar</small></span><ChevronRight size={18} /></button><input ref={fileRef} hidden type="file" accept="image/jpeg,image/png,image/webp,image/avif,image/heic,image/heif,.heic,.heif" onChange={(event) => void prepareUpload(event)} /><p className="avatar-privacy"><ShieldCheck size={15} /> A foto é otimizada e fica somente neste aparelho.</p>{current && <button className="avatar-remove" disabled={processing} onClick={() => void chooseAvatar(undefined)}>remover avatar atual</button>}</section></div>
+  })}</div><button className="avatar-upload-action" disabled={processing} onClick={() => fileRef.current?.click()}><Camera size={19} /><span><strong>{processing ? 'Preparando foto…' : 'Usar uma foto minha'}</strong><small>Ajustar posição e zoom antes de salvar</small></span><ChevronRight size={18} /></button><input ref={fileRef} hidden type="file" accept="image/jpeg,image/png,image/webp,image/avif,image/heic,image/heif,.heic,.heif" onChange={(event) => void prepareUpload(event)} /><p className="avatar-privacy"><ShieldCheck size={15} /> A foto é otimizada e fica somente neste aparelho.</p>{current && <button className="avatar-remove" disabled={processing} onClick={() => void chooseAvatar(undefined)}>Remover avatar atual</button>}</section></div>
 }
 
 function AvatarCropEditor({ editor, closeButton, processing, onBack, onSave }: { editor: { source: string; size: AvatarImageSize }; closeButton: RefObject<HTMLButtonElement | null>; processing: boolean; onBack: () => void; onSave: (crop: AvatarCrop) => Promise<void> }) {
@@ -1225,7 +1234,7 @@ function AvatarCropEditor({ editor, closeButton, processing, onBack, onSave }: {
   }
   const moveFocus = (deltaX: number, deltaY: number) => setCrop((current) => constrainAvatarCrop({ ...current, centerX: current.centerX + deltaX, centerY: current.centerY + deltaY }, editor.size))
 
-  return <div className="sheet-backdrop"><section className="bottom-sheet avatar-crop-sheet" role="dialog" aria-modal="true" aria-labelledby={titleId}><div className="sheet-handle" /><header><button ref={closeButton} className="icon-button" aria-label="Voltar para os avatares" disabled={processing} onClick={onBack}><ArrowLeft /></button><div><p className="eyebrow">sua foto</p><h2 id={titleId}>ajustar recorte</h2></div><span className="crop-header-spacer" /></header><div className="avatar-crop-stage" tabIndex={0} role="img" aria-label="Prévia do avatar. Arraste a foto ou use as setas do teclado para ajustar." onKeyDown={(event) => {
+  return <div className="sheet-backdrop"><section className="bottom-sheet avatar-crop-sheet" role="dialog" aria-modal="true" aria-labelledby={titleId}><div className="sheet-handle" /><header><button ref={closeButton} className="icon-button" aria-label="Voltar para os avatares" disabled={processing} onClick={onBack}><ArrowLeft /></button><div><p className="eyebrow">Sua foto</p><h2 id={titleId}>Ajustar recorte</h2></div><span className="crop-header-spacer" /></header><div className="avatar-crop-stage" tabIndex={0} role="img" aria-label="Prévia do avatar. Arraste a foto ou use as setas do teclado para ajustar." onKeyDown={(event) => {
     const step = .025 / crop.zoom
     if (event.key === 'ArrowLeft') { event.preventDefault(); moveFocus(-step, 0) }
     if (event.key === 'ArrowRight') { event.preventDefault(); moveFocus(step, 0) }
@@ -1241,7 +1250,7 @@ function AvatarCropEditor({ editor, closeButton, processing, onBack, onSave }: {
       const currentRect = avatarCropRect(current, editor.size)
       return constrainAvatarCrop({ ...current, centerX: current.centerX - deltaX / bounds.width * currentRect.size / editor.size.width, centerY: current.centerY - deltaY / bounds.height * currentRect.size / editor.size.height }, editor.size)
     })
-  }} onPointerUp={() => { drag.current = undefined }} onPointerCancel={() => { drag.current = undefined }}><img src={editor.source} alt="" draggable={false} style={imageStyle} /><span className="avatar-crop-mask" aria-hidden="true" /><span className="crop-move-hint" aria-hidden="true"><Move size={17} /> arraste para mover</span></div><label className="avatar-zoom"><span>zoom</span><input type="range" min="1" max="3" step="0.05" value={crop.zoom} onChange={(event) => setCrop((current) => constrainAvatarCrop({ ...current, zoom: Number(event.target.value) }, editor.size))} /><output>{Math.round(crop.zoom * 100)}%</output></label><div className="avatar-crop-actions"><button className="crop-reset" disabled={processing} onClick={() => setCrop({ centerX: .5, centerY: .5, zoom: 1 })}><RotateCcw size={17} /> redefinir</button><button className="primary-button" disabled={processing} onClick={() => void onSave(crop)}><Check size={18} /> {processing ? 'salvando…' : 'usar este recorte'}</button></div></section></div>
+  }} onPointerUp={() => { drag.current = undefined }} onPointerCancel={() => { drag.current = undefined }}><img src={editor.source} alt="" draggable={false} style={imageStyle} /><span className="avatar-crop-mask" aria-hidden="true" /><span className="crop-move-hint" aria-hidden="true"><Move size={17} /> Arraste para mover</span></div><label className="avatar-zoom"><span>Zoom</span><input type="range" min="1" max="3" step="0.05" value={crop.zoom} onChange={(event) => setCrop((current) => constrainAvatarCrop({ ...current, zoom: Number(event.target.value) }, editor.size))} /><output>{Math.round(crop.zoom * 100)}%</output></label><div className="avatar-crop-actions"><button className="crop-reset" disabled={processing} onClick={() => setCrop({ centerX: .5, centerY: .5, zoom: 1 })}><RotateCcw size={17} /> Redefinir</button><button className="primary-button" disabled={processing} onClick={() => void onSave(crop)}><Check size={18} /> {processing ? 'Salvando…' : 'Usar este recorte'}</button></div></section></div>
 }
 
 function AppUpdateScreen({ flow, onRetry }: { flow: UpdateFlow; onRetry: () => void }) {
@@ -1252,7 +1261,7 @@ function AppUpdateScreen({ flow, onRetry }: { flow: UpdateFlow; onRetry: () => v
     <img src={BRAND_ICON_URL} alt="" />
     {complete ? <span className="update-status-icon complete"><Check /></span> : stalled ? <span className="update-status-icon stalled"><RotateCcw /></span> : <span className="update-status-icon loading" />}
     <div>
-      <p className="eyebrow">{complete ? 'tudo certo' : stalled ? 'a atualização pausou' : 'só um instante'}</p>
+      <p className="eyebrow">{complete ? 'Tudo certo' : stalled ? 'A atualização pausou' : 'Só um instante'}</p>
       <h1>{complete ? 'Diário atualizado.' : stalled ? 'Vamos tentar de novo?' : 'Atualizando seu diário…'}</h1>
       <p>{complete
         ? `A versão ${CURRENT_RELEASE.version} foi confirmada.`
@@ -1260,7 +1269,7 @@ function AppUpdateScreen({ flow, onRetry }: { flow: UpdateFlow; onRetry: () => v
           ? flow.message ?? 'A nova versão ainda não foi confirmada.'
           : version ? `Instalando a versão ${version}. Não feche o aplicativo.` : 'Instalando a nova versão. Não feche o aplicativo.'}</p>
     </div>
-    {stalled && <button className="primary-button" onClick={onRetry}><RotateCcw size={18} /> tentar novamente</button>}
+    {stalled && <button className="primary-button" onClick={onRetry}><RotateCcw size={18} /> Tentar novamente</button>}
     {!complete && <small>Seus treinos e fotos permanecem guardados neste aparelho.</small>}
   </main>
 }
@@ -1301,7 +1310,7 @@ function ConfirmDialog({ open, title, confirmLabel, tone = 'default', busy = fal
     }
   }, [open, busy, onClose])
   if (!open) return null
-  return <div className="dialog-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget && !busy) onClose() }}><section className="confirm-dialog" role="dialog" aria-modal="true" aria-labelledby={titleId}><span className={`dialog-stroke ${tone}`} aria-hidden="true" /><h2 id={titleId}>{title}</h2><div className="dialog-copy">{children}</div><div className="dialog-actions"><button className="dialog-cancel" autoFocus disabled={busy} onClick={onClose}>voltar</button><button className={tone === 'danger' ? 'dialog-confirm danger' : 'dialog-confirm'} disabled={busy} onClick={onConfirm}>{busy ? 'aguarde…' : confirmLabel}</button></div></section></div>
+  return <div className="dialog-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget && !busy) onClose() }}><section className="confirm-dialog" role="dialog" aria-modal="true" aria-labelledby={titleId}><span className={`dialog-stroke ${tone}`} aria-hidden="true" /><h2 id={titleId}>{title}</h2><div className="dialog-copy">{children}</div><div className="dialog-actions"><button className="dialog-cancel" autoFocus disabled={busy} onClick={onClose}>Voltar</button><button className={tone === 'danger' ? 'dialog-confirm danger' : 'dialog-confirm'} disabled={busy} onClick={onConfirm}>{busy ? 'Aguarde…' : confirmLabel}</button></div></section></div>
 }
 
 function SimpleEmpty({ icon, title, text, action }: { icon: ReactNode; title: string; text?: string; action?: ReactNode }) {

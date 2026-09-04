@@ -58,7 +58,7 @@ function ExerciseMotion({ media }: { media: ExerciseMedia }) {
       />
       <button type="button" className="exercise-motion-toggle" aria-pressed={playing} onClick={() => setPlaying((current) => !current)}>
         {playing ? <Pause size={16} /> : <Play size={16} />}
-        <span>{playing ? 'parar movimento' : reduceMotion ? 'ver movimento mesmo assim' : 'ver movimento'}</span>
+        <span>{playing ? 'Parar movimento' : reduceMotion ? 'Ver movimento mesmo assim' : 'Ver movimento'}</span>
       </button>
     </div>
   )
