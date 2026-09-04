@@ -5,6 +5,8 @@ export type ActivityCategory = 'strength' | 'cardio' | 'other'
 export type MetricMode = 'load-reps' | 'reps-only' | 'distance-time' | 'time-only'
 export type WorkoutMetric = 'load' | 'reps' | 'distance' | 'duration'
 export type ExerciseVisual = 'squat' | 'press' | 'hinge' | 'bridge' | 'lunge' | 'pull' | 'raise' | 'curl' | 'plank' | 'walk' | 'cycle' | 'flow'
+export type AvatarPresetId = 'flex' | 'bottle' | 'lift' | 'run'
+export type ProfileAvatar = { type: 'preset'; presetId: AvatarPresetId } | { type: 'custom'; dataUrl: string }
 
 export interface Exercise {
   id: string
@@ -85,6 +87,7 @@ export interface Profile {
   showBmi?: boolean
   menstrualCycleDays?: number
   pregnancyStatus?: 'pregnant' | 'not-pregnant'
+  avatar?: ProfileAvatar
   onboarded: boolean
 }
 

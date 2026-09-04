@@ -1,8 +1,9 @@
-import { useEffect, useId, useMemo, useRef, useState, type ChangeEvent, type FormEvent, type ReactNode } from 'react'
+import { useEffect, useId, useMemo, useRef, useState, type ChangeEvent, type FormEvent, type ReactNode, type RefObject } from 'react'
 import {
   ArrowLeft,
   BarChart3,
   BookOpen,
+  Camera,
   Check,
   ChevronLeft,
   ChevronRight,
@@ -14,6 +15,7 @@ import {
   ImagePlus,
   Info,
   LogOut,
+  Move,
   NotebookPen,
   PencilLine,
   Play,
@@ -35,6 +37,7 @@ import { CURRENT_RELEASE, getInitialUpdateFlow, type AppRelease, type UpdateFlow
 import { db, clearAllData, defaultProfile, loadSnapshot, saveProfile } from './db'
 import { exerciseGroups, exercises as systemExercises } from './data/exercises'
 import { systemTemplates } from './data/templates'
+import { avatarCropRect, avatarPresets, constrainAvatarCrop, profileAvatarSource, type AvatarCrop, type AvatarImageSize } from './avatar'
 import { calculateBmi, defaultMetricsForMode, formatLocalizedNumber, isSetValidForMetrics, kgToLb, lbToKg, parseLocalizedNumber, workoutMetricOrder } from './domain'
 import { ExerciseVisual } from './components/ExerciseVisual'
 import { applyAppUpdate } from './pwa-update'
@@ -42,7 +45,7 @@ import { canShowInstallNudge, consumeCapturedInstallPrompt, getInstallPlatform, 
 import { getAuthErrorMessage, useAuth } from './auth'
 import { exerciseProgress, thisMonthCount, totalCompletedSets, workoutDurationMinutes } from './stats'
 import { MAX_TIMELINE_PHOTOS, timelineImages, timelineMedia } from './timeline'
-import type { ActivityCategory, AppSnapshot, Exercise, Feeling, MetricMode, Profile, TimelineEntry, Workout, WorkoutItem, WorkoutMetric, WorkoutSet, WorkoutTemplate } from './types'
+import type { ActivityCategory, AppSnapshot, Exercise, Feeling, MetricMode, Profile, ProfileAvatar, TimelineEntry, Workout, WorkoutItem, WorkoutMetric, WorkoutSet, WorkoutTemplate } from './types'
 
 const makeId = () => crypto.randomUUID()
 const formatDay = (value: string) => new Intl.DateTimeFormat('pt-BR', { day: '2-digit', month: 'short' }).format(new Date(value)).replace('.', '')
@@ -979,12 +982,13 @@ function ProfilePage({ data, refresh, setNotice, installExperience }: SharedProp
   const [dataActionBusy, setDataActionBusy] = useState(false)
   const [installActionBusy, setInstallActionBusy] = useState(false)
   const [installHelpOpen, setInstallHelpOpen] = useState(false)
+  const [avatarPickerOpen, setAvatarPickerOpen] = useState(false)
   const fileRef = useRef<HTMLInputElement>(null)
   const persistProfile = async (next: Profile) => { setLocalProfile(next); await saveProfile(next); await refresh() }
   const displayWeight = profile.bodyWeightKg === undefined ? undefined : profile.loadUnit === 'kg' ? profile.bodyWeightKg : kgToLb(profile.bodyWeightKg)
   const bmi = calculateBmi(profile.bodyWeightKg, profile.heightCm)
   const exportData = async () => {
-    const backup = { app: BACKUP_APP_ID, schemaVersion: 3, exportedAt: new Date().toISOString(), data }
+    const backup = { app: BACKUP_APP_ID, schemaVersion: 4, exportedAt: new Date().toISOString(), data }
     const url = URL.createObjectURL(new Blob([JSON.stringify(backup, null, 2)], { type: 'application/json' }))
     const anchor = document.createElement('a')
     anchor.href = url
@@ -998,7 +1002,7 @@ function ProfilePage({ data, refresh, setNotice, installExperience }: SharedProp
     if (!file) return
     try {
       const backup = JSON.parse(await file.text()) as { app?: string; schemaVersion?: number; data?: AppSnapshot }
-      if (!backup.app || !ACCEPTED_BACKUP_APP_IDS.has(backup.app) || ![1, 2, 3].includes(backup.schemaVersion ?? 0) || !backup.data) throw new Error('invalid')
+      if (!backup.app || !ACCEPTED_BACKUP_APP_IDS.has(backup.app) || ![1, 2, 3, 4].includes(backup.schemaVersion ?? 0) || !backup.data) throw new Error('invalid')
       setPendingBackup({ data: backup.data })
     } catch {
       setNotice('Este arquivo não é um backup válido.')
@@ -1048,11 +1052,12 @@ function ProfilePage({ data, refresh, setNotice, installExperience }: SharedProp
     if (result === 'installed') setNotice('A Brabita já está instalada neste aparelho.')
   }
   const installSteps = getManualInstallSteps(installExperience.platform)
+  const avatarSource = profileAvatarSource(profile.avatar, import.meta.env.BASE_URL)
   return <>
     <div className="page profile-page">
       <PageHeader eyebrow="seu espaço" title="eu" />
       <section className="profile-intro">
-        <div className="avatar-soft"><UserRound /></div>
+        <button className="avatar-soft" aria-label="Escolher avatar do perfil" onClick={() => setAvatarPickerOpen(true)}>{avatarSource ? <img src={avatarSource} alt="Avatar escolhido" /> : <UserRound />}<span className="avatar-edit" aria-hidden="true"><PencilLine size={13} /></span></button>
         <label><span>como quer ser chamada?</span><input value={profile.nickname} placeholder="seu apelido" onBlur={() => void persistProfile(profile)} onChange={(event) => setLocalProfile({ ...profile, nickname: event.target.value })} /></label>
       </section>
       <section className="settings-section">
@@ -1102,7 +1107,107 @@ function ProfilePage({ data, refresh, setNotice, installExperience }: SharedProp
         setNotice(getAuthErrorMessage(error))
       })
     }} busy={dataActionBusy}><p>A conta e o diário dela neste aparelho serão excluídos. Esta ação não pode ser desfeita.</p></ConfirmDialog>
+    {avatarPickerOpen && <AvatarPickerSheet current={profile.avatar} onClose={() => setAvatarPickerOpen(false)} onChoose={async (avatar) => { await persistProfile({ ...profile, avatar }); setAvatarPickerOpen(false); setNotice(avatar ? 'Avatar atualizado.' : 'Avatar removido.') }} setNotice={setNotice} />}
   </>
+}
+
+function AvatarPickerSheet({ current, onClose, onChoose, setNotice }: { current?: ProfileAvatar; onClose: () => void; onChoose: (avatar?: ProfileAvatar) => Promise<void>; setNotice: (message: string) => void }) {
+  const [editor, setEditor] = useState<{ source: string; size: AvatarImageSize }>()
+  const [processing, setProcessing] = useState(false)
+  const closeButton = useRef<HTMLButtonElement>(null)
+  const fileRef = useRef<HTMLInputElement>(null)
+  const titleId = useId()
+
+  useEffect(() => {
+    const previousOverflow = document.body.style.overflow
+    document.body.style.overflow = 'hidden'
+    const focusFrame = window.requestAnimationFrame(() => closeButton.current?.focus())
+    const onKeyDown = (event: KeyboardEvent) => { if (event.key === 'Escape' && !processing) editor ? setEditor(undefined) : onClose() }
+    window.addEventListener('keydown', onKeyDown)
+    return () => {
+      window.cancelAnimationFrame(focusFrame)
+      document.body.style.overflow = previousOverflow
+      window.removeEventListener('keydown', onKeyDown)
+    }
+  }, [editor, onClose, processing])
+
+  const prepareUpload = async (event: ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0]
+    event.target.value = ''
+    if (!file) return
+    if (!isSupportedImage(file) || file.size > 20_000_000) {
+      setNotice('Escolha uma foto JPG, PNG, WebP, AVIF ou HEIC de até 20 MB.')
+      return
+    }
+    setProcessing(true)
+    try {
+      const source = await compressImage(file)
+      const image = await ensureImageLoads(source)
+      setEditor({ source, size: { width: image.naturalWidth, height: image.naturalHeight } })
+    } catch {
+      setNotice('Não conseguimos preparar esta foto. Tente escolher outra imagem.')
+    } finally {
+      setProcessing(false)
+    }
+  }
+
+  const chooseAvatar = async (avatar?: ProfileAvatar) => {
+    setProcessing(true)
+    try {
+      await onChoose(avatar)
+    } finally {
+      setProcessing(false)
+    }
+  }
+
+  if (editor) return <AvatarCropEditor editor={editor} closeButton={closeButton} onBack={() => setEditor(undefined)} onSave={async (crop) => {
+    setProcessing(true)
+    try {
+      const dataUrl = await createAvatarCrop(editor.source, crop, editor.size)
+      await onChoose({ type: 'custom', dataUrl })
+    } catch {
+      setNotice('Não conseguimos salvar este recorte. Sua foto original não foi alterada.')
+    } finally {
+      setProcessing(false)
+    }
+  }} processing={processing} />
+
+  return <div className="sheet-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget && !processing) onClose() }}><section className="bottom-sheet avatar-picker-sheet" role="dialog" aria-modal="true" aria-labelledby={titleId}><div className="sheet-handle" /><header><div><p className="eyebrow">do seu jeito</p><h2 id={titleId}>escolher avatar</h2></div><button ref={closeButton} className="icon-button" aria-label="Fechar escolha de avatar" disabled={processing} onClick={onClose}><X /></button></header><p className="avatar-picker-copy">Escolha uma personagem ou use uma foto sua. Você pode trocar quando quiser.</p><div className="avatar-preset-grid" role="group" aria-label="Personagens disponíveis">{avatarPresets.map((preset) => {
+    const selected = current?.type === 'preset' && current.presetId === preset.id
+    return <button type="button" key={preset.id} className={selected ? 'selected' : ''} aria-pressed={selected} disabled={processing} onClick={() => void chooseAvatar({ type: 'preset', presetId: preset.id })}><img src={`${import.meta.env.BASE_URL}${preset.file}`} alt="" /><span>{preset.label}</span>{selected && <i aria-hidden="true"><Check size={15} /></i>}</button>
+  })}</div><button className="avatar-upload-action" disabled={processing} onClick={() => fileRef.current?.click()}><Camera size={19} /><span><strong>{processing ? 'preparando foto…' : 'usar uma foto minha'}</strong><small>ajustar posição e zoom antes de salvar</small></span><ChevronRight size={18} /></button><input ref={fileRef} hidden type="file" accept="image/jpeg,image/png,image/webp,image/avif,image/heic,image/heif,.heic,.heif" onChange={(event) => void prepareUpload(event)} /><p className="avatar-privacy"><ShieldCheck size={15} /> A foto é otimizada e fica somente neste aparelho.</p>{current && <button className="avatar-remove" disabled={processing} onClick={() => void chooseAvatar(undefined)}>remover avatar atual</button>}</section></div>
+}
+
+function AvatarCropEditor({ editor, closeButton, processing, onBack, onSave }: { editor: { source: string; size: AvatarImageSize }; closeButton: RefObject<HTMLButtonElement | null>; processing: boolean; onBack: () => void; onSave: (crop: AvatarCrop) => Promise<void> }) {
+  const [crop, setCrop] = useState<AvatarCrop>({ centerX: .5, centerY: .5, zoom: 1 })
+  const drag = useRef<{ x: number; y: number } | undefined>(undefined)
+  const titleId = useId()
+  const rect = avatarCropRect(crop, editor.size)
+  const imageStyle = {
+    width: `${editor.size.width / rect.size * 100}%`,
+    height: `${editor.size.height / rect.size * 100}%`,
+    left: `${-rect.x / rect.size * 100}%`,
+    top: `${-rect.y / rect.size * 100}%`,
+  }
+  const moveFocus = (deltaX: number, deltaY: number) => setCrop((current) => constrainAvatarCrop({ ...current, centerX: current.centerX + deltaX, centerY: current.centerY + deltaY }, editor.size))
+
+  return <div className="sheet-backdrop"><section className="bottom-sheet avatar-crop-sheet" role="dialog" aria-modal="true" aria-labelledby={titleId}><div className="sheet-handle" /><header><button ref={closeButton} className="icon-button" aria-label="Voltar para os avatares" disabled={processing} onClick={onBack}><ArrowLeft /></button><div><p className="eyebrow">sua foto</p><h2 id={titleId}>ajustar recorte</h2></div><span className="crop-header-spacer" /></header><div className="avatar-crop-stage" tabIndex={0} role="img" aria-label="Prévia do avatar. Arraste a foto ou use as setas do teclado para ajustar." onKeyDown={(event) => {
+    const step = .025 / crop.zoom
+    if (event.key === 'ArrowLeft') { event.preventDefault(); moveFocus(-step, 0) }
+    if (event.key === 'ArrowRight') { event.preventDefault(); moveFocus(step, 0) }
+    if (event.key === 'ArrowUp') { event.preventDefault(); moveFocus(0, -step) }
+    if (event.key === 'ArrowDown') { event.preventDefault(); moveFocus(0, step) }
+  }} onPointerDown={(event) => { event.currentTarget.setPointerCapture(event.pointerId); drag.current = { x: event.clientX, y: event.clientY } }} onPointerMove={(event) => {
+    if (!drag.current) return
+    const bounds = event.currentTarget.getBoundingClientRect()
+    const deltaX = event.clientX - drag.current.x
+    const deltaY = event.clientY - drag.current.y
+    drag.current = { x: event.clientX, y: event.clientY }
+    setCrop((current) => {
+      const currentRect = avatarCropRect(current, editor.size)
+      return constrainAvatarCrop({ ...current, centerX: current.centerX - deltaX / bounds.width * currentRect.size / editor.size.width, centerY: current.centerY - deltaY / bounds.height * currentRect.size / editor.size.height }, editor.size)
+    })
+  }} onPointerUp={() => { drag.current = undefined }} onPointerCancel={() => { drag.current = undefined }}><img src={editor.source} alt="" draggable={false} style={imageStyle} /><span className="avatar-crop-mask" aria-hidden="true" /><span className="crop-move-hint" aria-hidden="true"><Move size={17} /> arraste para mover</span></div><label className="avatar-zoom"><span>zoom</span><input type="range" min="1" max="3" step="0.05" value={crop.zoom} onChange={(event) => setCrop((current) => constrainAvatarCrop({ ...current, zoom: Number(event.target.value) }, editor.size))} /><output>{Math.round(crop.zoom * 100)}%</output></label><div className="avatar-crop-actions"><button className="crop-reset" disabled={processing} onClick={() => setCrop({ centerX: .5, centerY: .5, zoom: 1 })}><RotateCcw size={17} /> redefinir</button><button className="primary-button" disabled={processing} onClick={() => void onSave(crop)}><Check size={18} /> {processing ? 'salvando…' : 'usar este recorte'}</button></div></section></div>
 }
 
 function AppUpdateScreen({ flow, onRetry }: { flow: UpdateFlow; onRetry: () => void }) {
@@ -1189,6 +1294,24 @@ async function compressImage(file: File): Promise<string> {
   } finally {
     URL.revokeObjectURL(source)
   }
+}
+
+async function createAvatarCrop(source: string, crop: AvatarCrop, size: AvatarImageSize) {
+  const image = await ensureImageLoads(source)
+  const rect = avatarCropRect(crop, size)
+  const canvas = document.createElement('canvas')
+  canvas.width = 512
+  canvas.height = 512
+  const context = canvas.getContext('2d')
+  if (!context) throw new Error('canvas-unavailable')
+  context.fillStyle = '#fffdf8'
+  context.fillRect(0, 0, canvas.width, canvas.height)
+  context.drawImage(image, rect.x, rect.y, rect.size, rect.size, 0, 0, canvas.width, canvas.height)
+  const webp = await canvasToBlob(canvas, 'image/webp', .82)
+  const blob = webp.type.toLocaleLowerCase() === 'image/webp'
+    ? webp
+    : await canvasToBlob(canvas, 'image/jpeg', .84)
+  return readFileAsDataUrl(blob)
 }
 
 async function compressHeicImage(file: File) {
