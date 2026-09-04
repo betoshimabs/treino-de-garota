@@ -1,8 +1,8 @@
 export const WEEKDAY_INVITATIONS = [
   'Domingo no seu ritmo.',
-  'Bora começar?',
+  'Começando com tudo',
   'Bora treinar!',
-  'Vamos no seu ritmo?',
+  'Mantenha o ritmo',
   'Que tal um treino?',
   'Sextou, bora?',
   'Sábado do seu jeito.',

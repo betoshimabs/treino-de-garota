@@ -5,8 +5,10 @@ import {
   BookOpen,
   Camera,
   Check,
+  ChevronDown,
   ChevronLeft,
   ChevronRight,
+  ChevronUp,
   Clock3,
   Download,
   Dumbbell,
@@ -18,6 +20,7 @@ import {
   Move,
   NotebookPen,
   PencilLine,
+  Pause,
   Play,
   Plus,
   RotateCcw,
@@ -230,7 +233,7 @@ function AppContent() {
           <span>Continuar <ChevronRight size={17} /></span>
         </NavLink>
       )}
-      {showInstall && <aside className={`install-nudge ${showNav ? '' : 'during-workout'}`} aria-label="Instalar aplicativo">
+      {showInstall && !location.pathname.startsWith('/treino/ativo') && <aside className="install-nudge" aria-label="Instalar aplicativo">
         <img className="install-mark" src={BRAND_ICON_URL} alt="" />
         <div><strong>Levar o diário com você</strong><p>{showIosHelp ? getManualInstallSteps(installPlatform).join(' ') : 'Instale para abrir rápido e usar offline.'}</p></div>
         {!showIosHelp && <button className="install-action" onClick={async () => {
@@ -388,6 +391,10 @@ function WorkoutPage({ data, refresh, setNotice, allExercises, allTemplates }: S
   const [finishConfirm, setFinishConfirm] = useState(false)
   const [abandonConfirm, setAbandonConfirm] = useState(false)
   const [actionBusy, setActionBusy] = useState(false)
+  const [currentItemId, setCurrentItemId] = useState<string>()
+  const [dockCollapsed, setDockCollapsed] = useState(false)
+  const [dockFieldFocused, setDockFieldFocused] = useState(false)
+  const activeItemIds = active?.items.map((item) => item.id).join('|') ?? ''
 
   useEffect(() => {
     if (seconds <= 0) return
@@ -402,6 +409,33 @@ function WorkoutPage({ data, refresh, setNotice, allExercises, allTemplates }: S
     const focusFrame = window.requestAnimationFrame(() => document.querySelector<HTMLButtonElement>('.exercise-picker-sheet .icon-button')?.focus())
     return () => { window.cancelAnimationFrame(focusFrame); document.body.style.overflow = previous }
   }, [pickerOpen])
+
+  useEffect(() => {
+    if (!active) {
+      setCurrentItemId(undefined)
+      return
+    }
+    setCurrentItemId((current) => active.items.some((item) => item.id === current) ? current : active.items[0]?.id)
+  }, [active?.id, activeItemIds])
+
+  useEffect(() => {
+    if (!active || active.items.length === 0) return
+    let observer: IntersectionObserver | undefined
+    const frame = window.requestAnimationFrame(() => {
+      const elements = Array.from(document.querySelectorAll<HTMLElement>('[data-workout-item]'))
+      observer = new IntersectionObserver((entries) => {
+        const candidate = entries
+          .filter((entry) => entry.isIntersecting)
+          .sort((left, right) => Math.abs(left.boundingClientRect.top - 150) - Math.abs(right.boundingClientRect.top - 150))[0]
+        if (candidate?.target instanceof HTMLElement) setCurrentItemId(candidate.target.dataset.workoutItem)
+      }, { rootMargin: '-92px 0px -45% 0px', threshold: [0.15, 0.4] })
+      elements.forEach((element) => observer?.observe(element))
+    })
+    return () => {
+      window.cancelAnimationFrame(frame)
+      observer?.disconnect()
+    }
+  }, [active?.id, activeItemIds, section])
 
   if (!active) return <SimpleEmpty icon={<Dumbbell />} title="Nenhum treino em andamento" action={<button className="primary-button" onClick={() => navigate('/')}>Voltar para o início</button>} />
 
@@ -420,8 +454,12 @@ function WorkoutPage({ data, refresh, setNotice, allExercises, allTemplates }: S
   })
   const addExercise = async (exercise: Exercise) => {
     const latest = await db.workouts.get(active.id) ?? active
-    await persist({ ...latest, items: [...latest.items, toWorkoutItem(exercise)] })
+    const workoutItem = toWorkoutItem(exercise)
+    await persist({ ...latest, items: [...latest.items, workoutItem] })
+    setCurrentItemId(workoutItem.id)
+    setSection(workoutItem.category === 'strength' ? 'strength' : 'activities')
     closePicker()
+    window.requestAnimationFrame(() => window.requestAnimationFrame(() => document.getElementById(`workout-item-${workoutItem.id}`)?.scrollIntoView({ behavior: window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth', block: 'start' })))
   }
   const addTemplate = async (template: WorkoutTemplate) => {
     const latest = await db.workouts.get(active.id) ?? active
@@ -433,11 +471,11 @@ function WorkoutPage({ data, refresh, setNotice, allExercises, allTemplates }: S
       .map(toWorkoutItem)
     if (additions.length === 0) { setNotice('Os exercícios deste modelo já estão no treino.'); return }
     await persist({ ...latest, items: [...latest.items, ...additions] })
-    const currentCategory = section === 'strength' ? 'strength' : 'activities'
-    const hasCurrentCategory = additions.some((item) => currentCategory === 'strength' ? item.category === 'strength' : item.category !== 'strength')
-    if (!hasCurrentCategory) setSection(additions[0].category === 'strength' ? 'strength' : 'activities')
+    setSection(additions[0].category === 'strength' ? 'strength' : 'activities')
+    setCurrentItemId(additions[0].id)
     closePicker()
     setNotice(`${template.name} adicionado ao treino.`)
+    window.requestAnimationFrame(() => window.requestAnimationFrame(() => document.getElementById(`workout-item-${additions[0].id}`)?.scrollIntoView({ behavior: window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth', block: 'start' })))
   }
   const updateSet = async (itemId: string, setId: string, patch: Partial<WorkoutSet>) => {
     await updateItem(itemId, (item) => ({ ...item, sets: item.sets.map((set) => set.id === setId ? { ...set, ...patch } : set) }))
@@ -518,9 +556,41 @@ function WorkoutPage({ data, refresh, setNotice, allExercises, allTemplates }: S
   const activityCount = active.items.length - strengthCount
   const completedItemCount = active.items.filter((item) => item.sets.some((set) => set.completed)).length
   const completedSetCount = active.items.reduce((sum, item) => sum + item.sets.filter((set) => set.completed).length, 0)
+  const currentItem = active.items.find((item) => item.id === currentItemId) ?? visibleItems[0] ?? active.items[0]
+  const currentItemIndex = currentItem ? active.items.findIndex((item) => item.id === currentItem.id) : -1
+  const nextItem = currentItemIndex >= 0 ? active.items[currentItemIndex + 1] : undefined
+  const currentCompletedSets = currentItem?.sets.filter((set) => set.completed).length ?? 0
+
+  const focusWorkoutItem = (item: WorkoutItem) => {
+    setCurrentItemId(item.id)
+    setSection(item.category === 'strength' ? 'strength' : 'activities')
+    window.requestAnimationFrame(() => window.requestAnimationFrame(() => document.getElementById(`workout-item-${item.id}`)?.scrollIntoView({ behavior: window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth', block: 'start' })))
+  }
+
+  const advanceWorkout = () => {
+    if (nextItem) {
+      focusWorkoutItem(nextItem)
+      return
+    }
+    document.querySelector('.finish-area')?.scrollIntoView({ behavior: window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth', block: 'center' })
+  }
+
+  const syncDockFieldFocus = () => {
+    const focused = document.activeElement
+    setDockFieldFocused(focused instanceof HTMLElement && focused.matches('input, textarea, select'))
+  }
+
+  const selectWorkoutSection = (nextSection: 'strength' | 'activities') => {
+    setSection(nextSection)
+    setQuery('')
+    const firstItem = active.items.find((item) => nextSection === 'strength' ? item.category === 'strength' : item.category !== 'strength')
+    setCurrentItemId(firstItem?.id)
+  }
 
   return (
-    <div className="workout-page">
+    <div className="workout-page training-mode" onFocusCapture={(event) => {
+      if (event.target instanceof HTMLElement && event.target.matches('input, textarea, select')) setDockFieldFocused(true)
+    }} onBlurCapture={() => window.requestAnimationFrame(syncDockFieldFocus)}>
       <header className="workout-topbar">
         <button className="icon-button" aria-label="Voltar" onClick={() => navigate('/')}><ArrowLeft /></button>
         <div><p>Treino em andamento</p><strong>{elapsed < 1 ? 'Agora' : `${elapsed} min`}</strong></div>
@@ -532,8 +602,8 @@ function WorkoutPage({ data, refresh, setNotice, allExercises, allTemplates }: S
       </div>
 
       <div className="workout-sections" role="tablist" aria-label="Tipo de atividade">
-        <button role="tab" aria-selected={section === 'strength'} className={section === 'strength' ? 'selected' : ''} onClick={() => { setSection('strength'); setQuery('') }}><Dumbbell size={17} /><span>Musculação</span><small>{strengthCount}</small></button>
-        <button role="tab" aria-selected={section === 'activities'} className={section === 'activities' ? 'selected' : ''} onClick={() => { setSection('activities'); setQuery('') }}><Clock3 size={17} /><span>Cardio e outras</span><small>{activityCount}</small></button>
+        <button role="tab" aria-selected={section === 'strength'} className={section === 'strength' ? 'selected' : ''} onClick={() => selectWorkoutSection('strength')}><Dumbbell size={17} /><span>Musculação</span><small>{strengthCount}</small></button>
+        <button role="tab" aria-selected={section === 'activities'} className={section === 'activities' ? 'selected' : ''} onClick={() => selectWorkoutSection('activities')}><Clock3 size={17} /><span>Cardio e outras</span><small>{activityCount}</small></button>
       </div>
 
       {section === 'strength' && <div className="rest-preference"><button onClick={() => setRestOpen(!restOpen)} aria-expanded={restOpen}><Clock3 size={16} /> Descanso {formatTimer(active.restSeconds ?? 90)} <SlidersHorizontal size={15} /></button>{restOpen && <div className="rest-options" aria-label="Tempo de descanso">{[45, 60, 90, 120, 180].map((value) => <button className={(active.restSeconds ?? 90) === value ? 'selected' : ''} key={value} onClick={() => void persist({ ...active, restSeconds: value })}>{formatTimer(value)}</button>)}</div>}</div>}
@@ -546,7 +616,7 @@ function WorkoutPage({ data, refresh, setNotice, allExercises, allTemplates }: S
         </div>
       ) : <>
         {visibleItems.map((item, itemIndex) => (
-          <section className="exercise-block" key={item.id} aria-labelledby={`exercise-${item.id}`}>
+          <section id={`workout-item-${item.id}`} data-workout-item={item.id} className={`exercise-block ${currentItem?.id === item.id ? 'current' : ''}`} key={item.id} aria-labelledby={`exercise-${item.id}`} onPointerDown={() => setCurrentItemId(item.id)} onFocusCapture={() => setCurrentItemId(item.id)}>
             <div className="exercise-block-title"><span>{String(itemIndex + 1).padStart(2, '0')}</span><h2 id={`exercise-${item.id}`}>{item.exerciseName}</h2><button className="icon-button small" aria-label={`Remover ${item.exerciseName}`} onClick={() => void persist({ ...active, items: active.items.filter((row) => row.id !== item.id) })}><X /></button></div>
             <MetricSelector item={item} unit={data.profile.loadUnit} onToggle={(metric) => void toggleMetric(item.id, metric)} />
             <div className="set-head"><span>{item.category === 'strength' ? 'Série' : 'Reg.'}</span><MetricLabels metrics={item.metrics ?? defaultMetricsForMode(item.metricMode)} unit={data.profile.loadUnit} /><span>Feito</span><span aria-hidden="true" /></div>
@@ -565,7 +635,6 @@ function WorkoutPage({ data, refresh, setNotice, allExercises, allTemplates }: S
         <button className="workout-add-plus after-list" aria-label={section === 'strength' ? 'Adicionar outro exercício' : 'Adicionar outra atividade'} onClick={openPicker}><Plus size={26} /></button>
       </>}
 
-      {seconds > 0 && <div className="rest-timer"><Clock3 size={18} /><span>Descanso</span><button aria-label="Diminuir descanso em 15 segundos" onClick={() => setSeconds((value) => Math.max(15, value - 15))}>−15</button><strong>{formatTimer(seconds)}</strong><button aria-label="Aumentar descanso em 15 segundos" onClick={() => setSeconds((value) => value + 15)}>+15</button><button aria-label="Encerrar descanso" onClick={() => setSeconds(0)}><X size={17} /></button></div>}
       <section className="finish-area">
         <p>Como foi hoje? <span>Opcional</span></p>
         <div className="feeling-row">
@@ -573,6 +642,39 @@ function WorkoutPage({ data, refresh, setNotice, allExercises, allTemplates }: S
         </div>
         <button className="primary-button wide" onClick={() => void askToFinish()}><Check size={19} /> Finalizar treino</button>
       </section>
+
+      <aside className={`workout-dock ${dockCollapsed || dockFieldFocused ? 'compact' : ''} ${seconds > 0 ? 'resting' : ''}`} aria-label="Atalhos do modo treino">
+        <button className="workout-dock-toggle" type="button" aria-label={dockCollapsed || dockFieldFocused ? 'Expandir atalhos do treino' : 'Recolher atalhos do treino'} aria-expanded={!dockCollapsed && !dockFieldFocused} disabled={dockFieldFocused} onClick={() => setDockCollapsed((value) => !value)}>{dockCollapsed || dockFieldFocused ? <ChevronUp size={18} /> : <ChevronDown size={18} />}</button>
+        {dockCollapsed || dockFieldFocused ? (
+          <button className="workout-dock-compact" type="button" disabled={!currentItem || dockFieldFocused} onClick={() => { setDockCollapsed(false); if (currentItem) focusWorkoutItem(currentItem) }}>
+            <span>{seconds > 0 ? `Descanso · ${formatTimer(seconds)}` : currentItem?.exerciseName ?? 'Adicione o primeiro exercício'}</span>
+            <small>{currentItem ? `${currentItemIndex + 1} de ${active.items.length}` : 'Modo treino'}</small>
+          </button>
+        ) : seconds > 0 ? (
+          <div className="workout-dock-rest">
+            <div className="workout-dock-rest-heading"><span><Pause size={16} /> Pausa de descanso</span><small>{currentItem?.exerciseName ?? 'Treino em andamento'}</small></div>
+            <div className="workout-dock-rest-controls">
+              <button type="button" aria-label="Diminuir descanso em 15 segundos" onClick={() => setSeconds((value) => Math.max(15, value - 15))}>−15</button>
+              <strong>{formatTimer(seconds)}</strong>
+              <button type="button" aria-label="Aumentar descanso em 15 segundos" onClick={() => setSeconds((value) => value + 15)}>+15</button>
+              <button className="end-rest" type="button" onClick={() => setSeconds(0)}><Check size={17} /> Encerrar</button>
+            </div>
+          </div>
+        ) : (
+          <>
+            <button className="workout-dock-current" type="button" disabled={!currentItem} onClick={() => currentItem && focusWorkoutItem(currentItem)}>
+              <small>Modo treino · {currentItem ? `${currentItemIndex + 1} de ${active.items.length}` : 'comece adicionando'}</small>
+              <strong>{currentItem?.exerciseName ?? 'Nenhum exercício ainda'}</strong>
+              {currentItem && <span>{currentCompletedSets} de {currentItem.sets.length} {currentItem.sets.length === 1 ? 'registro concluído' : 'registros concluídos'}</span>}
+            </button>
+            <div className="workout-dock-actions">
+              <button type="button" onClick={openPicker}><Plus size={19} /><span>Adicionar</span></button>
+              <button type="button" disabled={!currentItem} onClick={() => setSeconds(active.restSeconds ?? 90)}><Pause size={18} /><span>Descansar</span></button>
+              <button className="next" type="button" disabled={!currentItem} onClick={advanceWorkout}><span>{nextItem ? 'Próximo' : 'Revisar'}</span><ChevronRight size={19} /></button>
+            </div>
+          </>
+        )}
+      </aside>
 
       {pickerOpen && <div className="sheet-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) closePicker() }}><section className="bottom-sheet exercise-picker-sheet" role="dialog" aria-modal="true" aria-labelledby="picker-title"><div className="sheet-handle" /><header><h2 id="picker-title">Adicionar ao treino</h2><button className="icon-button" aria-label="Fechar" onClick={closePicker}><X /></button></header><div className="picker-tabs" role="tablist" aria-label="O que adicionar"><button role="tab" aria-selected={pickerMode === 'exercise'} className={pickerMode === 'exercise' ? 'selected' : ''} onClick={() => { setPickerMode('exercise'); setQuery('') }}>Exercício</button><button role="tab" aria-selected={pickerMode === 'template'} className={pickerMode === 'template' ? 'selected' : ''} onClick={() => { setPickerMode('template'); setQuery('') }}>Modelo</button></div><label className="search-field"><Search size={19} /><input placeholder={pickerMode === 'exercise' ? (section === 'strength' ? 'Buscar exercício' : 'Buscar cardio ou atividade') : 'Buscar modelo'} value={query} onChange={(event) => setQuery(event.target.value)} /></label>{pickerMode === 'exercise' ? <div className="picker-list" tabIndex={-1}>{filtered.map((exercise) => <button key={exercise.id} onClick={() => void addExercise(exercise)}><ExerciseArtwork exercise={exercise} compact /><span><strong>{exercise.name}</strong><small>{exercise.group} · {exercise.equipment}</small></span><Plus size={19} /></button>)}</div> : <div className="picker-list picker-template-list" tabIndex={-1}>{filteredTemplates.map((template) => <button key={template.id} onClick={() => void addTemplate(template)}><span className="template-picker-mark" /><span><strong>{template.name}</strong><small>{template.note}</small><em>{template.exerciseIds.slice(0, 3).map((id) => allExercises.find((exercise) => exercise.id === id)?.name).filter(Boolean).join(' · ')}</em></span><Plus size={19} /></button>)}</div>}</section></div>}
 
