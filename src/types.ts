@@ -68,8 +68,14 @@ export interface WorkoutItem {
 export interface Workout {
   id: string
   title: string
+  /** Sugestões automáticas param quando a pessoa personaliza o título. */
+  titleMode?: 'auto' | 'custom'
+  /** Versão textual quando a sugestão visual usa emoji. */
+  titleTextAlternative?: string
   status: WorkoutStatus
   startedAt: string
+  /** Presente quando a sessão nasceu de um modelo, para orientar a sequência sem travar edições. */
+  sourceTemplateId?: string
   endedAt?: string
   items: WorkoutItem[]
   feeling?: Feeling
@@ -92,6 +98,7 @@ export interface TimelineEntry {
   kind: TimelineKind
   occurredAt: string
   title: string
+  titleTextAlternative?: string
   text?: string
   imageDataUrls?: string[]
   /** Mantido para ler registros e backups criados antes da galeria múltipla. */

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { calculateBmi, defaultMetricsForMode, isSetValid, isSetValidForMetrics, parseLocalizedNumber } from './domain'
+import { calculateBmi, defaultMetricsForMode, isSetValid, isSetValidForMetrics, parseLocalizedNumber, workoutItemReadiness } from './domain'
 
 describe('entradas localizadas', () => {
   it('aceita vírgula e ponto decimal', () => {
@@ -29,6 +29,13 @@ describe('métricas orientadas à atividade', () => {
     expect(defaultMetricsForMode('load-reps')).toEqual(['load', 'reps'])
     expect(isSetValidForMetrics({ id: '1', reps: 12, durationMinutes: 2, completed: false }, ['reps', 'duration'])).toBe(true)
     expect(isSetValidForMetrics({ id: '2', reps: 12, completed: false }, ['reps', 'duration'])).toBe(false)
+  })
+
+  it('distingue valores faltando, prontos para confirmar e concluídos', () => {
+    const base = { id: 'item', exerciseId: 'agachamento', exerciseName: 'Agachamento', category: 'strength' as const, metricMode: 'load-reps' as const, metrics: ['load', 'reps'] as const }
+    expect(workoutItemReadiness({ ...base, metrics: [...base.metrics], sets: [{ id: '1', load: 20, completed: false }] })).toBe('missing-values')
+    expect(workoutItemReadiness({ ...base, metrics: [...base.metrics], sets: [{ id: '1', load: 20, reps: 10, completed: false }] })).toBe('ready-to-confirm')
+    expect(workoutItemReadiness({ ...base, metrics: [...base.metrics], sets: [{ id: '1', load: 20, reps: 10, completed: true }] })).toBe('complete')
   })
 })
 

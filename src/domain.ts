@@ -1,4 +1,4 @@
-import type { MetricMode, WorkoutMetric, WorkoutSet } from './types'
+import type { MetricMode, WorkoutItem, WorkoutMetric, WorkoutSet } from './types'
 
 export const workoutMetricOrder: WorkoutMetric[] = ['load', 'reps', 'distance', 'duration']
 
@@ -32,6 +32,15 @@ export function isSetValidForMetrics(set: WorkoutSet, metrics: WorkoutMetric[]):
     if (metric === 'distance') return positive(set.distanceKm)
     return positive(set.durationMinutes)
   })
+}
+
+export type WorkoutItemReadiness = 'missing-values' | 'ready-to-confirm' | 'complete'
+
+export function workoutItemReadiness(item: WorkoutItem): WorkoutItemReadiness {
+  if (item.sets.length === 0) return 'missing-values'
+  const metrics = item.metrics ?? defaultMetricsForMode(item.metricMode)
+  if (!item.sets.every((set) => isSetValidForMetrics(set, metrics))) return 'missing-values'
+  return item.sets.every((set) => set.completed) ? 'complete' : 'ready-to-confirm'
 }
 
 export function calculateBmi(weightKg?: number, heightCm?: number): number | undefined {
