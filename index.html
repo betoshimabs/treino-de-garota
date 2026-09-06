@@ -15,7 +15,27 @@
     <title>Brabita — diário de treino</title>
   </head>
   <body>
-    <div id="root"></div>
+    <style>
+      #app-opening{position:fixed;inset:0;z-index:9999;display:flex;flex-direction:column;align-items:center;justify-content:center;background:#ea6b7e;color:#171512;font-family:system-ui,sans-serif;transition:opacity .3s ease}
+      #app-opening.opening-leave{opacity:0;pointer-events:none}
+      .opening-art{position:relative;width:min(100%,420px);aspect-ratio:3/2}
+      .opening-art img{position:absolute;inset:0;width:100%;height:100%;object-fit:contain}
+      .opening-art [hidden]{display:none}
+      #app-opening p{font-size:14px;text-align:center;padding:0 24px}
+      .opening-recovery{text-align:center;max-width:340px}
+      .opening-recovery button{min-height:48px;padding:10px 20px;border:0;border-radius:12px;background:#171512;color:#fffdf8;font:inherit}
+      @media(prefers-reduced-motion:reduce){#app-opening{transition:none}}
+    </style>
+    <div id="app-opening" role="status" aria-label="Abrindo a Brabita">
+      <div class="opening-art" aria-hidden="true">
+        <img data-opening-poster src="%BASE_URL%brand-motion/opening-poster.webp" width="1080" height="720" alt="" hidden />
+        <img data-opening-animation src="%BASE_URL%brand-motion/opening.webp" width="1080" height="720" alt="" fetchpriority="high" />
+      </div>
+      <div class="opening-recovery" hidden><p>Está demorando mais que o esperado. Você pode tentar abrir novamente.</p><button type="button">Tentar novamente</button></div>
+    </div>
+    <div id="root" inert></div>
+    <script src="%BASE_URL%brand-motion/opening.js"></script>
+    <noscript><style>#app-opening{display:none}</style>Ative o JavaScript no navegador para abrir a Brabita.</noscript>
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>

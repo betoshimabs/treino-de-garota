@@ -39,6 +39,7 @@ import { systemTemplates } from './data/templates'
 import { avatarCropRect, avatarPresets, constrainAvatarCrop, profileAvatarSource, type AvatarCrop, type AvatarImageSize } from './avatar'
 import { calculateBmi, defaultMetricsForMode, formatLocalizedNumber, isSetValidForMetrics, kgToLb, lbToKg, parseLocalizedNumber, workoutItemReadiness, workoutMetricOrder } from './domain'
 import { ExerciseArtwork } from './components/ExerciseVisual'
+import { BrandLoading, BrandMotion, useOpeningReady } from './components/BrandLoading'
 import { applyAppUpdate } from './pwa-update'
 import { canShowInstallNudge, consumeCapturedInstallPrompt, getInstallPlatform, getManualInstallSteps, INSTALL_SNOOZE_DURATION_MS, INSTALL_SNOOZE_KEY, subscribeToInstallPrompt, type BeforeInstallPromptEvent, type InstallPlatform } from './pwa-install'
 import { getAuthErrorMessage, useAuth } from './auth'
@@ -83,6 +84,8 @@ function App() {
 function AppContent() {
   const [data, setData] = useState<AppSnapshot>(emptySnapshot)
   const [loading, setLoading] = useState(true)
+  const [loadError, setLoadError] = useState(false)
+  useOpeningReady(!loading || loadError)
   const [notice, setNotice] = useState('')
   const [updateReady, setUpdateReady] = useState<{ target?: AppRelease }>()
   const [updateFlow, setUpdateFlow] = useState<UpdateFlow>(getInitialUpdateFlow)
@@ -99,7 +102,7 @@ function AppContent() {
   }
 
   useEffect(() => {
-    void refresh()
+    void refresh().catch(() => setLoadError(true))
     const updateListener = (event: Event) => setUpdateReady((event as CustomEvent<{ target?: AppRelease }>).detail ?? {})
     const applyingListener = (event: Event) => {
       const detail = (event as CustomEvent<{ target?: AppRelease }>).detail
@@ -200,7 +203,8 @@ function AppContent() {
   }
 
   if (loading) {
-    return <main className="loading-screen"><img className="brand-logo" src={BRAND_ICON_URL} alt="" /><strong className="brand-name">Brabita</strong><p>Abrindo seu diário…</p></main>
+    if (loadError) return <main className="loading-error"><h1>Não conseguimos abrir seu diário.</h1><p>Seus dados não foram apagados.</p><button className="primary-button" onClick={() => window.location.reload()}>Tentar novamente</button></main>
+    return <main><BrandLoading text="Abrindo seu diário…" /></main>
   }
 
   if (!data.profile.onboarded) {
@@ -855,7 +859,7 @@ function TimelinePage({ data, refresh, setNotice }: SharedProps) {
       <FloatingAddButton tone="pink" label="Adicionar à linha" onClick={() => setComposer(true)} />
       <TimelineDetailDialog entry={selectedEntry} workout={selectedEntry?.sourceId ? data.workouts.find((workout) => workout.id === selectedEntry.sourceId) : undefined} loadUnit={data.profile.loadUnit} onClose={() => setSelectedEntryId(undefined)} />
       {selectedMediaId && <TimelineMediaViewer key={selectedMediaId} items={media} entries={data.timeline} activeId={selectedMediaId} onClose={() => setSelectedMediaId(undefined)} />}
-      {composer && <div className="sheet-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget && !photoBusy) setComposer(false) }}><form className="bottom-sheet composer" onSubmit={(event) => void saveEntry(event)}><div className="sheet-handle" /><header><div><h2>Guardar na linha</h2><p className="composer-count">{imageDataUrls.length} de {MAX_TIMELINE_PHOTOS} fotos</p></div><button type="button" className="icon-button" aria-label="Fechar" disabled={photoBusy} onClick={() => setComposer(false)}><X /></button></header>{photoBusy && <div className="photo-processing" role="status">Preparando foto {photoProgress.current} de {photoProgress.total}…</div>}{imageDataUrls.length > 0 && <div className={`composer-previews count-${imageDataUrls.length}`}>{imageDataUrls.map((source, index) => <div className="photo-ready" key={`${source.slice(-24)}-${index}`}><img className="composer-preview" src={source} alt={`Prévia da foto ${index + 1}`} onError={() => { setImageDataUrls((current) => current.filter((_, itemIndex) => itemIndex !== index)); setNotice('Uma foto não pôde ser exibida e foi removida.') }} /><button type="button" aria-label={`Remover foto ${index + 1}`} onClick={() => setImageDataUrls((current) => current.filter((_, itemIndex) => itemIndex !== index))}><X size={17} /></button></div>)}</div>}<textarea value={note} onChange={(event) => setNote(event.target.value)} placeholder="O que você quer lembrar?" aria-label="Anotação" /><div className="composer-actions"><label className={`secondary-button file-button ${imageDataUrls.length >= MAX_TIMELINE_PHOTOS ? 'disabled' : ''}`}><ImagePlus size={18} /> {imageDataUrls.length > 0 ? 'Adicionar fotos' : 'Escolher fotos'}<input type="file" multiple disabled={photoBusy || imageDataUrls.length >= MAX_TIMELINE_PHOTOS} accept="image/jpeg,image/png,image/webp,image/avif,image/heic,image/heif,image/heic-sequence,image/heif-sequence,.heic,.heif" onChange={(event) => void choosePhoto(event)} /></label><button className="primary-button" disabled={photoBusy || (!note.trim() && imageDataUrls.length === 0)}>Guardar</button></div><p className="privacy-note"><Info size={15} /> Até 5 fotos, otimizadas e guardadas neste aparelho.</p></form></div>}
+      {composer && <div className="sheet-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget && !photoBusy) setComposer(false) }}><form className="bottom-sheet composer" onSubmit={(event) => void saveEntry(event)}><div className="sheet-handle" /><header><div><h2>Guardar na linha</h2><p className="composer-count">{imageDataUrls.length} de {MAX_TIMELINE_PHOTOS} fotos</p></div><button type="button" className="icon-button" aria-label="Fechar" disabled={photoBusy} onClick={() => setComposer(false)}><X /></button></header>{photoBusy && <BrandLoading inline text={`Preparando foto ${photoProgress.current} de ${photoProgress.total}…`} />}{imageDataUrls.length > 0 && <div className={`composer-previews count-${imageDataUrls.length}`}>{imageDataUrls.map((source, index) => <div className="photo-ready" key={`${source.slice(-24)}-${index}`}><img className="composer-preview" src={source} alt={`Prévia da foto ${index + 1}`} onError={() => { setImageDataUrls((current) => current.filter((_, itemIndex) => itemIndex !== index)); setNotice('Uma foto não pôde ser exibida e foi removida.') }} /><button type="button" aria-label={`Remover foto ${index + 1}`} onClick={() => setImageDataUrls((current) => current.filter((_, itemIndex) => itemIndex !== index))}><X size={17} /></button></div>)}</div>}<textarea value={note} onChange={(event) => setNote(event.target.value)} placeholder="O que você quer lembrar?" aria-label="Anotação" /><div className="composer-actions"><label className={`secondary-button file-button ${imageDataUrls.length >= MAX_TIMELINE_PHOTOS ? 'disabled' : ''}`}><ImagePlus size={18} /> {imageDataUrls.length > 0 ? 'Adicionar fotos' : 'Escolher fotos'}<input type="file" multiple disabled={photoBusy || imageDataUrls.length >= MAX_TIMELINE_PHOTOS} accept="image/jpeg,image/png,image/webp,image/avif,image/heic,image/heif,image/heic-sequence,image/heif-sequence,.heic,.heif" onChange={(event) => void choosePhoto(event)} /></label><button className="primary-button" disabled={photoBusy || (!note.trim() && imageDataUrls.length === 0)}>Guardar</button></div><p className="privacy-note"><Info size={15} /> Até 5 fotos, otimizadas e guardadas neste aparelho.</p></form></div>}
     </div>
   )
 }
@@ -1319,7 +1323,7 @@ function AvatarPickerSheet({ current, onClose, onChoose, setNotice }: { current?
   return <div className="sheet-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget && !processing) onClose() }}><section className="bottom-sheet avatar-picker-sheet" role="dialog" aria-modal="true" aria-labelledby={titleId}><div className="sheet-handle" /><header><div><p className="eyebrow">Do seu jeito</p><h2 id={titleId}>Escolher avatar</h2></div><button ref={closeButton} className="icon-button" aria-label="Fechar escolha de avatar" disabled={processing} onClick={onClose}><X /></button></header><p className="avatar-picker-copy">Escolha uma personagem ou use uma foto sua. Você pode trocar quando quiser.</p><div className="avatar-preset-grid" role="group" aria-label="Personagens disponíveis">{avatarPresets.map((preset) => {
     const selected = current?.type === 'preset' && current.presetId === preset.id
     return <button type="button" key={preset.id} className={selected ? 'selected' : ''} aria-pressed={selected} disabled={processing} onClick={() => void chooseAvatar({ type: 'preset', presetId: preset.id })}><img src={`${import.meta.env.BASE_URL}${preset.file}`} alt="" /><span>{preset.label}</span>{selected && <i aria-hidden="true"><Check size={15} /></i>}</button>
-  })}</div><button className="avatar-upload-action" disabled={processing} onClick={() => fileRef.current?.click()}><Camera size={19} /><span><strong>{processing ? 'Preparando foto…' : 'Usar uma foto minha'}</strong><small>Ajustar posição e zoom antes de salvar</small></span><ChevronRight size={18} /></button><input ref={fileRef} hidden type="file" accept="image/jpeg,image/png,image/webp,image/avif,image/heic,image/heif,.heic,.heif" onChange={(event) => void prepareUpload(event)} /><p className="avatar-privacy"><ShieldCheck size={15} /> A foto é otimizada e fica somente neste aparelho.</p>{current && <button className="avatar-remove" disabled={processing} onClick={() => void chooseAvatar(undefined)}>Remover avatar atual</button>}</section></div>
+  })}</div>{processing && <BrandLoading inline text="Preparando sua foto…" />}<button className="avatar-upload-action" disabled={processing} onClick={() => fileRef.current?.click()}><Camera size={19} /><span><strong>{processing ? 'Preparando foto…' : 'Usar uma foto minha'}</strong><small>Ajustar posição e zoom antes de salvar</small></span><ChevronRight size={18} /></button><input ref={fileRef} hidden type="file" accept="image/jpeg,image/png,image/webp,image/avif,image/heic,image/heif,.heic,.heif" onChange={(event) => void prepareUpload(event)} /><p className="avatar-privacy"><ShieldCheck size={15} /> A foto é otimizada e fica somente neste aparelho.</p>{current && <button className="avatar-remove" disabled={processing} onClick={() => void chooseAvatar(undefined)}>Remover avatar atual</button>}</section></div>
 }
 
 function AvatarCropEditor({ editor, closeButton, processing, onBack, onSave }: { editor: { source: string; size: AvatarImageSize }; closeButton: RefObject<HTMLButtonElement | null>; processing: boolean; onBack: () => void; onSave: (crop: AvatarCrop) => Promise<void> }) {
@@ -1359,8 +1363,8 @@ function AppUpdateScreen({ flow, onRetry }: { flow: UpdateFlow; onRetry: () => v
   const stalled = flow.phase === 'stalled'
   const version = complete ? CURRENT_RELEASE.version : flow.target?.version
   return <main className="app-update-screen" aria-live="polite" aria-busy={!complete && !stalled}>
-    <img src={BRAND_ICON_URL} alt="" />
-    {complete ? <span className="update-status-icon complete"><Check /></span> : stalled ? <span className="update-status-icon stalled"><RotateCcw /></span> : <span className="update-status-icon loading" />}
+    <BrandMotion />
+    {complete ? <span className="update-status-icon complete"><Check /></span> : stalled ? <span className="update-status-icon stalled"><RotateCcw /></span> : null}
     <div>
       <p className="eyebrow">{complete ? 'Tudo certo' : stalled ? 'A atualização pausou' : 'Só um instante'}</p>
       <h1>{complete ? 'Diário atualizado.' : stalled ? 'Vamos tentar de novo?' : 'Atualizando seu diário…'}</h1>

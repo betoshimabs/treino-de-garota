@@ -1,20 +1,17 @@
 import { defineConfig } from 'vitest/config'
 import react from '@vitejs/plugin-react'
 import { VitePWA } from 'vite-plugin-pwa'
+import { releaseVersion } from './src/release-version.ts'
 
 declare const process: { env: Record<string, string | undefined> }
 
 const builtAt = new Date().toISOString()
 const configuredBase = process.env.VITE_BASE_PATH ?? '/'
 const basePath = configuredBase.endsWith('/') ? configuredBase : `${configuredBase}/`
-const packageVersion = process.env.npm_package_version ?? '0.1.0'
-const [major = '0', minor = '1'] = packageVersion.split('.')
 const runNumber = process.env.GITHUB_RUN_NUMBER
 const runAttempt = process.env.GITHUB_RUN_ATTEMPT ?? '1'
 const commit = process.env.GITHUB_SHA ?? 'local'
-const appVersion = runNumber
-  ? `${major}.${minor}.${runNumber}${runAttempt === '1' ? '' : `-r${runAttempt}`}`
-  : `${packageVersion}-dev`
+const appVersion = releaseVersion(builtAt)
 const appBuildId = runNumber
   ? `${process.env.GITHUB_RUN_ID ?? runNumber}.${runAttempt}.${commit}`
   : `local.${builtAt}`
@@ -42,6 +39,8 @@ export default defineConfig({
     VitePWA({
       registerType: 'autoUpdate',
       includeAssets: [
+        'brand-motion/opening.webp',
+        'brand-motion/opening-poster.webp',
         'brabita-favicon-32.png',
         'brabita-apple-touch-icon.png',
         'brabita-icon-192.png',

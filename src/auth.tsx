@@ -1,4 +1,4 @@
-import { createContext, useContext, useEffect, useMemo, useState, type FormEvent, type ReactNode } from 'react'
+import { createContext, useContext, useEffect, useMemo, useRef, useState, type FormEvent, type ReactNode } from 'react'
 import { FirebaseError } from 'firebase/app'
 import {
   GoogleAuthProvider,
@@ -14,7 +14,8 @@ import {
   updateProfile,
   type User,
 } from 'firebase/auth'
-import { ArrowLeft, Check, Eye, EyeOff, LogIn, Mail, RotateCcw } from 'lucide-react'
+import { ArrowLeft, ArrowRight, Check, Eye, EyeOff, LogIn, Mail, RotateCcw } from 'lucide-react'
+import { BrandLoading, useOpeningReady } from './components/BrandLoading'
 import { auth, authPersistenceReady } from './firebase'
 import {
   deleteDatabaseForUser,
@@ -55,7 +56,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         setUser(nextUser)
         setLoading(false)
       }, () => setLoading(false))
-    })
+    }).catch(() => { if (active) setLoading(false) })
     return () => {
       active = false
       unsubscribe()
@@ -126,6 +127,7 @@ export function AuthGate({ children }: { children: ReactNode }) {
 function UserDataBoundary({ userId, children }: { userId: string; children: ReactNode }) {
   const [state, setState] = useState<'loading' | 'legacy' | 'ready' | 'error'>('loading')
   const [busy, setBusy] = useState(false)
+  useOpeningReady(state === 'legacy' || state === 'error')
 
   useEffect(() => {
     let active = true
@@ -144,6 +146,7 @@ function UserDataBoundary({ userId, children }: { userId: string; children: Reac
       <p className="eyebrow">Um cuidado antes de entrar</p>
       <h1>Encontramos seu diário deste aparelho.</h1>
       <p>Você pode vinculá-lo a esta conta. A cópia anterior será preservada como segurança.</p>
+      {busy && <BrandLoading inline text="Trazendo seu diário…" />}
       <button className="primary-button wide" disabled={busy} onClick={async () => {
         setBusy(true)
         try {
@@ -164,6 +167,10 @@ function UserDataBoundary({ userId, children }: { userId: string; children: Reac
 function AuthScreen() {
   const { createAccount, resetPassword, signInWithEmail, signInWithGoogle } = useAuth()
   const [mode, setMode] = useState<'signin' | 'signup' | 'reset'>('signin')
+  const [screen, setScreen] = useState<'welcome' | 'methods' | 'email'>('welcome')
+  const headingRef = useRef<HTMLHeadingElement>(null)
+  useOpeningReady()
+  useEffect(() => { if (screen !== 'welcome') headingRef.current?.focus() }, [screen, mode])
   const [name, setName] = useState('')
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
@@ -202,35 +209,57 @@ function AuthScreen() {
     setMessage('')
     setPassword('')
     setConfirmPassword('')
+    setShowPassword(false)
+    setScreen(nextMode === 'reset' ? 'email' : 'methods')
   }
 
-  return <main className="auth-shell"><section className="auth-card">
-    <BrandSignature />
-    {mode === 'reset' ? <button className="auth-back" onClick={() => changeMode('signin')}><ArrowLeft size={18} /> Voltar</button> : <div className="auth-tabs" role="tablist" aria-label="Acesso à conta">
-      <button role="tab" aria-selected={mode === 'signin'} className={mode === 'signin' ? 'selected' : ''} onClick={() => changeMode('signin')}>Entrar</button>
-      <button role="tab" aria-selected={mode === 'signup'} className={mode === 'signup' ? 'selected' : ''} onClick={() => changeMode('signup')}>Criar conta</button>
-    </div>}
-    <div className="auth-heading">
-      <p className="eyebrow">{mode === 'signin' ? 'Bom te ver por aqui' : mode === 'signup' ? 'Seu diário começa aqui' : 'Recuperar acesso'}</p>
-      <h1>{mode === 'signin' ? 'Entre na Brabita.' : mode === 'signup' ? 'Crie sua conta.' : 'Esqueceu a senha?'}</h1>
-      <p>{mode === 'reset' ? 'Digite seu e-mail e enviaremos um link de redefinição.' : 'Seus registros ficam neste aparelho, separados pela sua conta.'}</p>
+  if (screen === 'welcome') return <main className="welcome-shell">
+    <div className="welcome-brand"><BrandSignature /></div>
+    <section className="welcome-content">
+      <h1>Bom te ver<br /><span className="welcome-emphasis">por aqui<svg viewBox="0 0 320 25" aria-hidden="true"><path d="M8 15C80 25 223 5 310 9" /></svg></span><span className="welcome-dot">.</span></h1>
+      <p>Treine no seu ritmo.<br />Registre e acompanhe sua evolução.</p>
+    </section>
+    <div className="welcome-actions">
+      <button className="welcome-start" onClick={() => changeMode('signup')}>Comece agora! <ArrowRight size={23} /></button>
+      <button className="auth-text-button" onClick={() => changeMode('signin')}>Já tenho uma conta</button>
     </div>
-    {mode !== 'reset' && <button className="google-button" disabled={busy} onClick={async () => {
+    <span className="welcome-footnote">Seu treino, do jeito que aconteceu.</span>
+  </main>
+
+  return <main className="auth-shell auth-flow"><section className="auth-card" key={`${mode}-${screen}`}>
+    <header className="auth-flow-header"><button className="auth-back" disabled={busy} onClick={() => {
+      setError(''); setMessage('')
+      if (mode === 'reset') changeMode('signin')
+      else if (screen === 'email') setScreen('methods')
+      else { setScreen('welcome'); setPassword(''); setConfirmPassword('') }
+    }}><ArrowLeft size={18} /> Voltar</button><span className="auth-wordmark">Brabita</span></header>
+    <div className="auth-heading">
+      <p className="eyebrow">{mode === 'signin' ? 'Seu espaço te espera' : mode === 'signup' ? 'Um começo do seu jeito' : 'Recuperar acesso'}</p>
+      <h1 ref={headingRef} tabIndex={-1}>{mode === 'signin' ? 'Vamos entrar?' : mode === 'signup' ? 'Seu diário começa aqui.' : 'Esqueceu a senha?'}</h1>
+      <p>{mode === 'reset' ? 'Digite seu e-mail e enviaremos um link de redefinição.' : screen === 'methods' ? mode === 'signup' ? 'Escolha como quer criar sua conta.' : 'Entre com a conta que você já usa.' : 'Seus registros ficam neste aparelho, separados pela sua conta.'}</p>
+    </div>
+    {screen === 'methods' && <div className="auth-methods"><button className="google-button" disabled={busy} onClick={async () => {
       setError('')
       setBusy(true)
       try { await signInWithGoogle() } catch (caught) { setError(getAuthErrorMessage(caught)) } finally { setBusy(false) }
-    }}><GoogleMark /> Continuar com Google</button>}
-    {mode !== 'reset' && <div className="auth-divider"><span>Ou use seu e-mail</span></div>}
-    <form className="auth-form" onSubmit={(event) => void submit(event)}>
-      {mode === 'signup' && <label><span>Como quer ser chamada?</span><input autoComplete="name" value={name} onChange={(event) => setName(event.target.value)} placeholder="Seu nome ou apelido" required /></label>}
+    }}><GoogleMark /> Continuar com Google</button>
+    <div className="auth-divider"><span>Ou</span></div>
+    <button className="secondary-button wide auth-email-choice" disabled={busy} onClick={() => { setError(''); setScreen('email') }}><Mail size={20} />{mode === 'signup' ? 'Registrar com e-mail e senha' : 'Entrar com e-mail e senha'}</button>
+    {error && <p className="auth-feedback error" role="alert">{error}</p>}
+    <p className="auth-local-note">Seu diário é pessoal. Os registros ficam guardados neste aparelho.</p>
+    </div>}
+    {screen === 'email' && <form className="auth-form" onSubmit={(event) => void submit(event)}>
+      {mode === 'signup' && <label><span>Como quer ser chamada? (opcional)</span><input autoComplete="name" value={name} onChange={(event) => setName(event.target.value)} placeholder="Seu nome ou apelido" disabled={busy} /></label>}
       <label><span>E-mail</span><input type="email" inputMode="email" autoComplete="email" value={email} onChange={(event) => setEmail(event.target.value)} placeholder="voce@exemplo.com" required /></label>
       {mode !== 'reset' && <label><span>Senha</span><span className="password-field"><input type={showPassword ? 'text' : 'password'} autoComplete={mode === 'signup' ? 'new-password' : 'current-password'} minLength={6} value={password} onChange={(event) => setPassword(event.target.value)} placeholder={mode === 'signup' ? 'Pelo menos 6 caracteres' : 'Sua senha'} required /><button type="button" aria-label={showPassword ? 'Ocultar senha' : 'Mostrar senha'} onClick={() => setShowPassword((value) => !value)}>{showPassword ? <EyeOff size={19} /> : <Eye size={19} />}</button></span></label>}
       {mode === 'signup' && <label><span>Repita a senha</span><input type="password" autoComplete="new-password" minLength={6} value={confirmPassword} onChange={(event) => setConfirmPassword(event.target.value)} required /></label>}
       {error && <p className="auth-feedback error" role="alert">{error}</p>}
       {message && <p className="auth-feedback success" role="status"><Check size={17} /> {message}</p>}
       <button className="primary-button wide" disabled={busy}>{busy ? 'Só um instante…' : mode === 'signin' ? <><LogIn size={18} /> Entrar</> : mode === 'signup' ? 'Criar minha conta' : <><Mail size={18} /> Enviar link</>}</button>
-    </form>
-    {mode === 'signin' && <button className="auth-text-button" onClick={() => changeMode('reset')}>Esqueci minha senha</button>}
+    </form>}
+    {busy && <BrandLoading inline text={screen === 'methods' ? 'Conclua o acesso na janela do Google…' : 'Só um instante…'} />}
+    {mode === 'signin' && screen === 'email' && <button className="auth-text-button" disabled={busy} onClick={() => changeMode('reset')}>Esqueci minha senha</button>}
+    {mode !== 'reset' && <button className="auth-text-button auth-switch" disabled={busy} onClick={() => changeMode(mode === 'signin' ? 'signup' : 'signin')}>{mode === 'signin' ? 'Ainda não tenho conta' : 'Já tenho uma conta'}</button>}
     <details className="origin-migration-note">
       <summary>Já usava a versão de teste?</summary>
       <p>Os navegadores não levam dados automaticamente de um domínio para outro. Abra a versão anterior, baixe o backup em <strong>Eu → Seus dados</strong> e restaure aqui depois de entrar.</p>
@@ -240,6 +269,7 @@ function AuthScreen() {
 }
 
 function VerifyEmailScreen({ email }: { email: string }) {
+  useOpeningReady()
   const { refreshAccount, resendVerification, signOutAccount } = useAuth()
   const [busy, setBusy] = useState(false)
   const [message, setMessage] = useState('')
@@ -252,6 +282,7 @@ function VerifyEmailScreen({ email }: { email: string }) {
     <p>Enviamos um link de confirmação para <strong>{email}</strong>. Depois de confirmar, volte aqui.</p>
     {error && <p className="auth-feedback error" role="alert">{error}</p>}
     {message && <p className="auth-feedback success" role="status">{message}</p>}
+    {busy && <BrandLoading inline text="Conferindo sua conta…" />}
     <button className="primary-button wide" disabled={busy} onClick={async () => {
       setBusy(true); setError('')
       try {
@@ -268,10 +299,11 @@ function VerifyEmailScreen({ email }: { email: string }) {
 }
 
 function AuthLoading({ text }: { text: string }) {
-  return <main className="auth-loading"><img src={BRAND_ICON_URL} alt="" /><strong>Brabita</strong><span className="auth-spinner" /><p>{text}</p></main>
+  return <main><BrandLoading text={text} /></main>
 }
 
 function AuthMessage({ title, text }: { title: string; text: string }) {
+  useOpeningReady()
   return <main className="auth-shell"><section className="auth-card verification-card"><BrandSignature /><h1>{title}</h1><p>{text}</p><button className="primary-button" onClick={() => window.location.reload()}>Tentar novamente</button></section></main>
 }
 
