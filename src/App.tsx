@@ -1,4 +1,4 @@
-import { useEffect, useId, useMemo, useRef, useState, type ChangeEvent, type FormEvent, type ReactNode, type RefObject } from 'react'
+import { useEffect, useId, useMemo, useRef, useState, type ChangeEvent, type CSSProperties, type FormEvent, type ReactNode, type RefObject } from 'react'
 import {
   ArrowLeft,
   BarChart3,
@@ -33,7 +33,9 @@ import {
 } from 'lucide-react'
 import { HashRouter, NavLink, Route, Routes, useLocation, useNavigate, useParams } from 'react-router-dom'
 import { CURRENT_RELEASE, getInitialUpdateFlow, type AppRelease, type UpdateFlow } from './app-version'
-import { db, clearAllData, defaultProfile, loadSnapshot, saveProfile } from './db'
+import { db, clearAllData, defaultProfile, loadSnapshot, saveProfile, mutateActiveWorkout } from './db'
+import { WorkoutGuide } from './components/WorkoutGuide'
+import { recordGuidedSet, settleRests } from './workout-guide'
 import { exerciseGroups, exercises as systemExercises } from './data/exercises'
 import { systemTemplates } from './data/templates'
 import { avatarCropRect, avatarPresets, constrainAvatarCrop, profileAvatarSource, type AvatarCrop, type AvatarImageSize } from './avatar'
@@ -95,6 +97,11 @@ function AppContent() {
   const [appInstalled, setAppInstalled] = useState(() => isAppRunningInstalled())
   const installPlatform = getInstallPlatform(navigator.userAgent, navigator.platform, navigator.maxTouchPoints)
   const location = useLocation()
+  const headerTabIndex = ['/', '/linha', '/exercicios', '/evolucao', '/eu'].indexOf(location.pathname)
+  const [headerTravel, setHeaderTravel] = useState({ from: Math.max(0, headerTabIndex), to: Math.max(0, headerTabIndex) })
+  if (headerTabIndex >= 0 && headerTabIndex !== headerTravel.to) {
+    setHeaderTravel({ from: headerTravel.to, to: headerTabIndex })
+  }
 
   const refresh = async () => {
     setData(await loadSnapshot())
@@ -243,7 +250,7 @@ function AppContent() {
         }}>Instalar</button>}
         <button className="install-later" onClick={snoozeInstallNudge}>Lembrar mais tarde</button>
       </aside>}
-      <main id="conteudo" className={showNav ? 'page-area with-nav' : 'page-area'}>
+      <main id="conteudo" className={showNav ? 'page-area with-nav' : 'page-area'} style={{ '--ribbon-from': `${(headerTravel.from - 2) * 14}%`, '--ribbon-x': `${(headerTravel.to - 2) * 14}%` } as CSSProperties}>
         <Routes>
           <Route path="/" element={<TodayPage {...shared} />} />
           <Route path="/treino/ativo" element={<WorkoutPage {...shared} />} />
@@ -300,8 +307,8 @@ type PageHeaderVariant = 'home' | 'timeline' | 'library' | 'evolution' | 'profil
 
 function PageHeader({ eyebrow, title, action, variant }: { eyebrow?: string; title: string; action?: ReactNode; variant: PageHeaderVariant }) {
   return <header className={`page-header header-${variant}`}>
-    <svg className="page-header-ribbon" viewBox="0 0 760 150" preserveAspectRatio="none" aria-hidden="true" focusable="false">
-      <path d="M-24 0H784V72C704 77 655 95 575 88C487 81 433 110 340 114C239 118 188 87 102 93C49 98 11 113-24 120Z" />
+    <svg className="page-header-ribbon" viewBox="0 0 760 200" preserveAspectRatio="none" aria-hidden="true" focusable="false">
+      <path d="M-760-100V112H-200C40 112 112 196 350 196C586 196 680 120 960 120H1520V-100Z" />
     </svg>
     <div>{eyebrow && <p className="eyebrow">{eyebrow}</p>}<h1>{title}</h1></div>{action}
   </header>
@@ -327,6 +334,7 @@ function TodayPage({ data, refresh, allExercises, allTemplates }: SharedProps) {
       startedAt: new Date().toISOString(),
       sourceTemplateId: template?.id ?? repeat?.sourceTemplateId,
       restSeconds: repeat?.restSeconds ?? 90,
+      loadUnit: data.profile.loadUnit,
       items: repeat?.items.map((item) => ({
         id: makeId(), exerciseId: item.exerciseId, exerciseName: item.exerciseName, category: item.category, metricMode: item.metricMode,
         metrics: item.metrics ?? defaultMetricsForMode(item.metricMode),
@@ -376,20 +384,19 @@ function TodayPage({ data, refresh, allExercises, allTemplates }: SharedProps) {
           </NavLink>
         ))}
       </section>
-      <p className="little-note"><span>✦</span> Voltar também faz parte</p>
     </div>
   )
 }
 
 function WorkoutPage({ data, refresh, setNotice, allExercises, allTemplates }: SharedProps) {
   const navigate = useNavigate()
+  const workoutUnit = data.workouts.find(workout => workout.status === 'active')?.loadUnit ?? data.profile.loadUnit
   const active = data.workouts.find((workout) => workout.status === 'active')
   const [pickerOpen, setPickerOpen] = useState(false)
   const [pickerMode, setPickerMode] = useState<'exercise' | 'template'>('exercise')
   const [query, setQuery] = useState('')
   const [feeling, setFeeling] = useState<Feeling | undefined>(active?.feeling)
   const [section, setSection] = useState<'strength' | 'activities'>('strength')
-  const [restOpen, setRestOpen] = useState(false)
   const [finishConfirm, setFinishConfirm] = useState(false)
   const [abandonConfirm, setAbandonConfirm] = useState(false)
   const [actionBusy, setActionBusy] = useState(false)
@@ -419,12 +426,13 @@ function WorkoutPage({ data, refresh, setNotice, allExercises, allTemplates }: S
       return
     }
     setCurrentItemId((current) => {
+      if (active.currentItemId && active.items.some(item => item.id === active.currentItemId)) return active.currentItemId
       if (active.items.some((item) => item.id === current)) return current
       const firstItem = active.items[0]
       if (firstItem) setSection(firstItem.category === 'strength' ? 'strength' : 'activities')
       return firstItem?.id
     })
-  }, [active?.id, activeItemIds])
+  }, [active?.id, activeItemIds, active?.currentItemId])
 
   if (!active) return <SimpleEmpty icon={<Dumbbell />} title="Nenhum treino em andamento" action={<button className="primary-button" onClick={() => navigate('/')}>Voltar para o início</button>} />
 
@@ -449,12 +457,11 @@ function WorkoutPage({ data, refresh, setNotice, allExercises, allTemplates }: S
     const workout = suggestion
       ? { ...next, title: suggestion.title, titleTextAlternative: suggestion.accessibleTitle, titleMode: 'auto' as const }
       : next
-    await db.workouts.put(workout)
+    await mutateActiveWorkout(workout.id, latest => ({ ...workout, rests: latest.rests, currentItemId: latest.currentItemId, loadUnit: latest.loadUnit ?? workoutUnit }))
     await refresh()
   }
   const updateItem = async (itemId: string, fn: (item: WorkoutItem) => WorkoutItem) => {
-    const latest = await db.workouts.get(active.id) ?? active
-    await db.workouts.put({ ...latest, items: latest.items.map((item) => item.id === itemId ? fn(item) : item) })
+    await mutateActiveWorkout(active.id, latest => ({ ...latest, loadUnit: latest.loadUnit ?? workoutUnit, items: latest.items.map((item) => item.id === itemId ? fn(item) : item) }))
     await refresh()
   }
   const openPicker = () => { setPickerMode('exercise'); setQuery(''); setPickerOpen(true) }
@@ -468,8 +475,7 @@ function WorkoutPage({ data, refresh, setNotice, allExercises, allTemplates }: S
     const latest = await db.workouts.get(active.id) ?? active
     const workoutItem = toWorkoutItem(exercise)
     await persist({ ...latest, items: [...latest.items, workoutItem] })
-    setCurrentItemId(workoutItem.id)
-    setSection(workoutItem.category === 'strength' ? 'strength' : 'activities')
+    if (latest.items.length === 0 || (latest.items.at(-1)?.id === currentItemId && latest.items.at(-1)?.sets.every(set => set.completed))) focusWorkoutItem(workoutItem)
     closePicker()
     window.requestAnimationFrame(() => window.requestAnimationFrame(() => document.getElementById(`workout-item-${workoutItem.id}`)?.scrollIntoView({ behavior: window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth', block: 'start' })))
   }
@@ -483,14 +489,17 @@ function WorkoutPage({ data, refresh, setNotice, allExercises, allTemplates }: S
       .map(toWorkoutItem)
     if (additions.length === 0) { setNotice('Os exercícios deste modelo já estão no treino.'); return }
     await persist({ ...latest, sourceTemplateId: latest.sourceTemplateId ?? template.id, items: [...latest.items, ...additions] })
-    setSection(additions[0].category === 'strength' ? 'strength' : 'activities')
-    setCurrentItemId(additions[0].id)
+    if (latest.items.length === 0 || (latest.items.at(-1)?.id === currentItemId && latest.items.at(-1)?.sets.every(set => set.completed))) focusWorkoutItem(additions[0])
     closePicker()
     setNotice(`${template.name} adicionado ao treino.`)
     window.requestAnimationFrame(() => window.requestAnimationFrame(() => document.getElementById(`workout-item-${additions[0].id}`)?.scrollIntoView({ behavior: window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth', block: 'start' })))
   }
   const updateSet = async (itemId: string, setId: string, patch: Partial<WorkoutSet>) => {
-    await updateItem(itemId, (item) => ({ ...item, sets: item.sets.map((set) => set.id === setId ? { ...set, ...patch } : set) }))
+    await updateItem(itemId, (item) => ({ ...item, sets: item.sets.map((set) => {
+      if (set.id !== setId) return set
+      const next = { ...set, ...patch }
+      return next.completed && !isSetValidForMetrics(next, next.metrics ?? item.metrics ?? defaultMetricsForMode(item.metricMode)) ? { ...next, completed: false, completedAt: undefined } : next
+    }) }))
   }
   const toggleMetric = async (itemId: string, metric: WorkoutMetric) => {
     const item = (await db.workouts.get(active.id) ?? active).items.find((candidate) => candidate.id === itemId)
@@ -506,16 +515,19 @@ function WorkoutPage({ data, refresh, setNotice, allExercises, allTemplates }: S
     await updateItem(itemId, (candidate) => ({ ...candidate, metrics: next }))
   }
   const completeSet = async (itemId: string, set: WorkoutSet) => {
-    const latestWorkout = await db.workouts.get(active.id) ?? active
-    const item = latestWorkout.items.find((row) => row.id === itemId)
-    const latestSet = item?.sets.find((row) => row.id === set.id)
-    if (!item || !latestSet) return
-    if (!latestSet.completed && !isSetValidForMetrics(latestSet, item.metrics ?? defaultMetricsForMode(item.metricMode))) {
-      setNotice(item.category === 'strength' ? 'Preencha os valores obrigatórios acima de zero.' : 'Preencha os dados da atividade acima de zero.')
-      return
-    }
-    await db.workouts.put({ ...latestWorkout, items: latestWorkout.items.map((row) => row.id === itemId ? { ...row, sets: row.sets.map((entry) => entry.id === latestSet.id ? { ...entry, completed: !entry.completed } : entry) } : row) })
-    await refresh()
+    try {
+      await mutateActiveWorkout(active.id, latest => {
+        const item = latest.items.find(row => row.id === itemId)
+        const entry = item?.sets.find(row => row.id === set.id)
+        if (!item || !entry) return latest
+        if (entry.completed !== set.completed) return latest
+        const metrics = item.metrics ?? defaultMetricsForMode(item.metricMode)
+        if (!entry.completed && !isSetValidForMetrics(entry, metrics)) throw new Error('Preencha as medidas escolhidas acima de zero.')
+        if (!entry.completed) return { ...recordGuidedSet(latest, itemId, entry, metrics, new Date().toISOString()), loadUnit: latest.loadUnit ?? workoutUnit }
+        return { ...latest, loadUnit: latest.loadUnit ?? workoutUnit, items: latest.items.map(row => row.id !== itemId ? row : { ...row, sets: row.sets.map(value => value.id !== set.id ? value : { ...value, completed: !value.completed, completedAt: value.completed ? undefined : new Date().toISOString(), metrics: [...metrics] }) }) }
+      })
+      await refresh()
+    } catch (error) { setNotice(error instanceof Error ? error.message : 'Não conseguimos guardar o registro.') }
   }
   const askToFinish = async () => {
     const latest = await db.workouts.get(active.id) ?? active
@@ -528,28 +540,36 @@ function WorkoutPage({ data, refresh, setNotice, allExercises, allTemplates }: S
     setFinishConfirm(true)
   }
   const finish = async () => {
+    if (actionBusy) return
+    if (!feeling) { setNotice('Escolha a intensidade antes de guardar o treino.'); return }
     setActionBusy(true)
-    const latest = await db.workouts.get(active.id) ?? active
-    const endedAt = new Date().toISOString()
-    const editedTitle = titleEditing ? titleDraft.trim() : ''
-    const finalSuggestion = isAutomaticWorkoutTitle(latest) ? suggestTitle(latest) : undefined
-    const finalTitle = editedTitle || finalSuggestion?.title || latest.title
-    const finalTitleTextAlternative = editedTitle ? workoutTitleTextAlternative(editedTitle) : finalSuggestion?.accessibleTitle ?? latest.titleTextAlternative ?? workoutTitleTextAlternative(latest.title)
-    const completedWorkout = { ...latest, title: finalTitle, titleTextAlternative: finalTitleTextAlternative, titleMode: editedTitle ? 'custom' as const : latest.titleMode, status: 'completed' as const, endedAt, feeling }
-    const exerciseCount = latest.items.filter((item) => item.sets.some((set) => set.completed)).length
-    const setCount = latest.items.reduce((sum, item) => sum + item.sets.filter((set) => set.completed).length, 0)
-    const includesActivities = latest.items.some((item) => item.category !== 'strength' && item.sets.some((set) => set.completed))
-    const entry: TimelineEntry = {
-      id: makeId(), kind: 'workout', occurredAt: endedAt, title: finalTitle, titleTextAlternative: finalTitleTextAlternative,
-      text: `${exerciseCount} ${exerciseCount === 1 ? 'atividade' : 'atividades'} · ${setCount} ${includesActivities ? (setCount === 1 ? 'registro' : 'registros') : (setCount === 1 ? 'série' : 'séries')}`,
-      sourceId: latest.id, isMilestone: false,
-    }
-    await db.transaction('rw', [db.workouts, db.timeline], async () => { await db.workouts.put(completedWorkout); await db.timeline.put(entry) })
-    await refresh()
-    setActionBusy(false)
-    setFinishConfirm(false)
-    setNotice('Treino guardado na sua linha.')
-    navigate('/linha')
+    try {
+      await db.transaction('rw', [db.workouts, db.timeline], async () => {
+        const stored = await db.workouts.get(active.id)
+        if (!stored || stored.status !== 'active') throw new Error('Este treino já foi finalizado ou removido.')
+        const endedAt = new Date().toISOString()
+        const latest = settleRests(stored, Date.parse(endedAt), true)
+        if (!latest.items.some(item => item.sets.some(set => set.completed))) throw new Error('Conclua ao menos um registro antes de guardar.')
+        const editedTitle = titleEditing ? titleDraft.trim() : ''
+        const suggestion = isAutomaticWorkoutTitle(latest) ? suggestTitle(latest, feeling) : undefined
+        const title = editedTitle || suggestion?.title || latest.title
+        const titleTextAlternative = editedTitle ? workoutTitleTextAlternative(editedTitle) : suggestion?.accessibleTitle ?? latest.titleTextAlternative ?? title
+        const completedWorkout: Workout = { ...latest, title, titleTextAlternative, titleMode: editedTitle ? 'custom' : latest.titleMode, status: 'completed', endedAt, feeling, loadUnit: latest.loadUnit ?? workoutUnit }
+        const exerciseCount = latest.items.filter(item => item.sets.some(set => set.completed)).length
+        const setCount = latest.items.reduce((sum, item) => sum + item.sets.filter(set => set.completed).length, 0)
+        const restSeconds = (latest.rests ?? []).reduce((sum, rest) => sum + (rest.actualSeconds ?? 0), 0)
+        const entry: TimelineEntry = { id: `workout:${latest.id}`, kind: 'workout', occurredAt: endedAt, title, titleTextAlternative,
+          text: `${exerciseCount} atividades · ${setCount} registros · Intensidade ${feeling}${restSeconds ? ` · ${formatTimer(restSeconds)} de descanso` : ''}`,
+          sourceId: latest.id, isMilestone: false }
+        await db.workouts.put(completedWorkout)
+        await db.timeline.put(entry)
+      })
+      await refresh()
+      setFinishConfirm(false)
+      setNotice('Treino guardado na sua linha.')
+      navigate('/linha')
+    } catch (error) { setNotice(error instanceof Error ? error.message : 'Não conseguimos guardar. Seu treino continua aqui.') }
+    finally { setActionBusy(false) }
   }
   const abandon = async () => {
     setActionBusy(true)
@@ -568,16 +588,15 @@ function WorkoutPage({ data, refresh, setNotice, allExercises, allTemplates }: S
     return `${template.name} ${template.note} ${exerciseNames}`.toLocaleLowerCase().includes(query.toLocaleLowerCase())
   })
   const elapsed = Math.max(0, Math.floor((Date.now() - new Date(active.startedAt).getTime()) / 60000))
-  const visibleItems = active.items.filter((item) => section === 'strength' ? item.category === 'strength' : item.category !== 'strength')
   const strengthCount = active.items.filter((item) => item.category === 'strength').length
   const activityCount = active.items.length - strengthCount
   const completedItemCount = active.items.filter((item) => item.sets.some((set) => set.completed)).length
   const completedSetCount = active.items.reduce((sum, item) => sum + item.sets.filter((set) => set.completed).length, 0)
-  const currentItem = visibleItems.find((item) => item.id === currentItemId) ?? visibleItems[0]
+  const currentItem = active.items.find((item) => item.id === currentItemId) ?? active.items[0]
   const currentItemIndex = currentItem ? active.items.findIndex((item) => item.id === currentItem.id) : -1
 
   const chooseFeeling = async (value: Feeling) => {
-    const nextFeeling = feeling === value ? undefined : value
+    const nextFeeling = value
     setFeeling(nextFeeling)
     const latest = await db.workouts.get(active.id) ?? active
     await persist({ ...latest, feeling: nextFeeling })
@@ -601,6 +620,7 @@ function WorkoutPage({ data, refresh, setNotice, allExercises, allTemplates }: S
 
   const focusWorkoutItem = (item: WorkoutItem) => {
     setCurrentItemId(item.id)
+    void mutateActiveWorkout(active.id, latest => ({ ...latest, currentItemId: item.id })).then(refresh).catch(() => setNotice('Não conseguimos guardar o ponto do treino. Tente novamente.'))
     setSection(item.category === 'strength' ? 'strength' : 'activities')
     window.requestAnimationFrame(() => window.requestAnimationFrame(() => document.getElementById(`workout-item-${item.id}`)?.scrollIntoView({ behavior: window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth', block: 'start' })))
   }
@@ -608,8 +628,6 @@ function WorkoutPage({ data, refresh, setNotice, allExercises, allTemplates }: S
   const selectWorkoutSection = (nextSection: 'strength' | 'activities') => {
     setSection(nextSection)
     setQuery('')
-    const firstItem = active.items.find((item) => nextSection === 'strength' ? item.category === 'strength' : item.category !== 'strength')
-    setCurrentItemId(firstItem?.id)
   }
 
   return (
@@ -629,9 +647,8 @@ function WorkoutPage({ data, refresh, setNotice, allExercises, allTemplates }: S
         <button role="tab" aria-selected={section === 'activities'} className={section === 'activities' ? 'selected' : ''} onClick={() => selectWorkoutSection('activities')}><Clock3 size={17} /><span>Cardio e outras</span><small>{activityCount}</small></button>
       </div>
 
-      {section === 'strength' && <div className="rest-preference"><button onClick={() => setRestOpen(!restOpen)} aria-expanded={restOpen}><Clock3 size={16} /> Descanso {formatTimer(active.restSeconds ?? 90)} <SlidersHorizontal size={15} /></button>{restOpen && <div className="rest-options" aria-label="Tempo de descanso">{[45, 60, 90, 120, 180].map((value) => <button className={(active.restSeconds ?? 90) === value ? 'selected' : ''} key={value} onClick={() => void persist({ ...active, restSeconds: value })}>{formatTimer(value)}</button>)}</div>}</div>}
 
-      {visibleItems.length === 0 || !currentItem ? (
+      {!currentItem ? (
         <div className="workout-empty">
           <button className="workout-add-plus" aria-label={section === 'strength' ? 'Adicionar exercício' : 'Adicionar cardio ou atividade'} onClick={openPicker}><Plus size={29} /></button>
           <h2>{section === 'strength' ? 'Qual foi o primeiro?' : 'Algum cardio ou atividade?'}</h2>
@@ -640,7 +657,7 @@ function WorkoutPage({ data, refresh, setNotice, allExercises, allTemplates }: S
       ) : <>
         <nav className="workout-stepper" aria-label={active.sourceTemplateId ? 'Sequência do modelo' : 'Sequência do treino'}>
           <p>{active.sourceTemplateId ? 'Sequência do modelo' : 'Sequência do treino'}</p>
-          <div>{visibleItems.map((item) => {
+          <div>{active.items.map((item) => {
             const itemIndex = active.items.findIndex((candidate) => candidate.id === item.id)
             const complete = workoutItemReadiness(item) === 'complete'
             return <button type="button" key={item.id} className={item.id === currentItem.id ? 'current' : ''} aria-current={item.id === currentItem.id ? 'step' : undefined} onClick={() => focusWorkoutItem(item)}><span>{complete ? <Check size={14} /> : itemIndex + 1}</span><small>{item.exerciseName}</small></button>
@@ -648,33 +665,31 @@ function WorkoutPage({ data, refresh, setNotice, allExercises, allTemplates }: S
         </nav>
         <section id={`workout-item-${currentItem.id}`} className="exercise-block current" aria-labelledby={`exercise-${currentItem.id}`}>
             <div className="exercise-block-title"><span>{String(currentItemIndex + 1).padStart(2, '0')}</span><h2 id={`exercise-${currentItem.id}`}>{currentItem.exerciseName}</h2><button className="icon-button small" aria-label={`Remover ${currentItem.exerciseName}`} onClick={() => void persist({ ...active, items: active.items.filter((row) => row.id !== currentItem.id) })}><X /></button></div>
-            <MetricSelector item={currentItem} unit={data.profile.loadUnit} onToggle={(metric) => void toggleMetric(currentItem.id, metric)} />
-            <div className="set-head"><span>{currentItem.category === 'strength' ? 'Série' : 'Reg.'}</span><MetricLabels metrics={currentItem.metrics ?? defaultMetricsForMode(currentItem.metricMode)} unit={data.profile.loadUnit} /><span>Feito</span><span aria-hidden="true" /></div>
+            <MetricSelector item={currentItem} unit={workoutUnit} onToggle={(metric) => void toggleMetric(currentItem.id, metric)} />
+            <div className="set-head"><span>{currentItem.category === 'strength' ? 'Série' : 'Reg.'}</span><MetricLabels metrics={currentItem.metrics ?? defaultMetricsForMode(currentItem.metricMode)} unit={workoutUnit} /><span>Feito</span><span aria-hidden="true" /></div>
             {currentItem.sets.map((set, setIndex) => (
               <div className={set.completed ? 'set-row completed' : 'set-row'} key={set.id}>
                 <span className="set-number">{setIndex + 1}</span>
-                <MetricFields metrics={currentItem.metrics ?? defaultMetricsForMode(currentItem.metricMode)} unit={data.profile.loadUnit} set={set} index={setIndex} onCommit={(patch) => void updateSet(currentItem.id, set.id, patch)} />
+                <MetricFields metrics={currentItem.metrics ?? defaultMetricsForMode(currentItem.metricMode)} unit={workoutUnit} set={set} index={setIndex} onCommit={(patch) => void updateSet(currentItem.id, set.id, patch)} />
                 <button className="set-check" aria-label={set.completed ? `Reabrir ${currentItem.category === 'strength' ? 'série' : 'registro'} ${setIndex + 1}` : `Concluir ${currentItem.category === 'strength' ? 'série' : 'registro'} ${setIndex + 1}`} aria-pressed={set.completed} onClick={() => void completeSet(currentItem.id, set)}>{set.completed && <Check size={19} />}</button>
                 <button className="remove-set" aria-label={`Excluir ${currentItem.category === 'strength' ? 'série' : 'registro'} ${setIndex + 1}`} onClick={() => void updateItem(currentItem.id, (row) => ({ ...row, sets: row.sets.filter((entry) => entry.id !== set.id) }))}><Trash2 size={16} /></button>
               </div>
             ))}
-            <button className="add-set" onClick={() => void updateItem(currentItem.id, (row) => ({ ...row, sets: [...row.sets, { ...row.sets.at(-1), id: makeId(), completed: false }] }))}><Plus size={17} /> Adicionar {currentItem.category === 'strength' ? 'série' : 'registro'}</button>
+<button className="add-set" onClick={() => void updateItem(currentItem.id, (row) => ({ ...row, sets: [...row.sets, { ...row.sets.at(-1), id: makeId(), completed: false, completedAt: undefined }] }))}><Plus size={17} /> Adicionar {currentItem.category === 'strength' ? 'série' : 'registro'}</button>
             <ExerciseNoteInput itemId={currentItem.id} exerciseName={currentItem.exerciseName} value={currentItem.note} onCommit={(value) => void updateItem(currentItem.id, (row) => ({ ...row, note: value }))} />
         </section>
         <button className="workout-add-plus after-list" aria-label={section === 'strength' ? 'Adicionar outro exercício' : 'Adicionar outro cardio ou atividade'} onClick={openPicker}><Plus size={25} /></button>
       </>}
 
-      <section className="finish-area">
-        <p>Como foi hoje? <span>Opcional</span></p>
-        <div className="feeling-row">
-          {(['leve', 'normal', 'intenso'] as Feeling[]).map((value) => <button className={feeling === value ? 'selected' : ''} key={value} onClick={() => void chooseFeeling(value)}>{sentenceCase(value)}</button>)}
-        </div>
-        <button className="primary-button wide" onClick={() => void askToFinish()}><Check size={19} /> Finalizar treino</button>
-      </section>
+      <WorkoutGuide workout={active} unit={active.loadUnit ?? workoutUnit} refresh={refresh} onFocus={focusWorkoutItem} onAdd={openPicker} onFinish={askToFinish} />
 
       {pickerOpen && <div className="sheet-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) closePicker() }}><section className="bottom-sheet exercise-picker-sheet" role="dialog" aria-modal="true" aria-labelledby="picker-title"><div className="sheet-handle" /><header><h2 id="picker-title">Adicionar ao treino</h2><button className="icon-button" aria-label="Fechar" onClick={closePicker}><X /></button></header><div className="picker-tabs" role="tablist" aria-label="O que adicionar"><button role="tab" aria-selected={pickerMode === 'exercise'} className={pickerMode === 'exercise' ? 'selected' : ''} onClick={() => { setPickerMode('exercise'); setQuery('') }}>Exercício</button><button role="tab" aria-selected={pickerMode === 'template'} className={pickerMode === 'template' ? 'selected' : ''} onClick={() => { setPickerMode('template'); setQuery('') }}>Modelo</button></div><label className="search-field"><Search size={19} /><input placeholder={pickerMode === 'exercise' ? (section === 'strength' ? 'Buscar exercício' : 'Buscar cardio ou atividade') : 'Buscar modelo'} value={query} onChange={(event) => setQuery(event.target.value)} /></label>{pickerMode === 'exercise' ? <div className="picker-list" tabIndex={-1}>{filtered.map((exercise) => <button key={exercise.id} onClick={() => void addExercise(exercise)}><ExerciseArtwork exercise={exercise} compact /><span><strong>{exercise.name}</strong><small>{exercise.group} · {exercise.equipment}</small></span><Plus size={19} /></button>)}</div> : <div className="picker-list picker-template-list" tabIndex={-1}>{filteredTemplates.map((template) => <button key={template.id} onClick={() => void addTemplate(template)}><span className="template-picker-mark" /><span><strong>{template.name}</strong><small>{template.note}</small><em>{template.exerciseIds.slice(0, 3).map((id) => allExercises.find((exercise) => exercise.id === id)?.name).filter(Boolean).join(' · ')}</em></span><Plus size={19} /></button>)}</div>}</section></div>}
 
       <ConfirmDialog open={finishConfirm} title="Guardar este treino?" confirmLabel="Guardar treino" onClose={() => setFinishConfirm(false)} onConfirm={() => void finish()} busy={actionBusy}>
+        <p>Como foi a intensidade?</p>
+        <div className="feeling-row" role="group" aria-label="Intensidade do treino">{(['leve', 'normal', 'intenso'] as Feeling[]).map(value => <button disabled={actionBusy} aria-pressed={feeling === value} className={feeling === value ? 'selected' : ''} key={value} onClick={() => void chooseFeeling(value)}>{sentenceCase(value)}</button>)}</div>
+        {!feeling && <p>Escolha Leve, Normal ou Intenso antes de guardar.</p>}
+        {active.items.some(item => item.sets.some(set => !set.completed)) && <p>Há registros não concluídos. Eles ficam como rascunhos no histórico, sem contar nas estatísticas.</p>}
         <p>Confira o que vai entrar na sua linha.</p>
         <div className="workout-confirm-title">
           {titleEditing
@@ -687,6 +702,7 @@ function WorkoutPage({ data, refresh, setNotice, allExercises, allTemplates }: S
       </ConfirmDialog>
       <ConfirmDialog open={abandonConfirm} title="Apagar este treino?" confirmLabel="Apagar treino" tone="danger" onClose={() => setAbandonConfirm(false)} onConfirm={() => void abandon()} busy={actionBusy}>
         <p>As séries e atividades deste treino em andamento serão removidas deste aparelho.</p>
+        {completedSetCount > 0 && <button className="secondary-button" onClick={() => { setAbandonConfirm(false); void askToFinish() }}>Prefiro finalizar e guardar</button>}
       </ConfirmDialog>
     </div>
   )
@@ -991,7 +1007,7 @@ function TimelineDetailDialog({ entry, workout, loadUnit, onClose }: { entry?: T
   if (!entry) return null
   const images = timelineImages(entry)
   const kindLabel = entry.kind === 'workout' ? 'Treino' : images.length > 0 ? `${images.length} ${images.length === 1 ? 'foto' : 'fotos'}` : 'Nota'
-  return <div className="detail-dialog-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose() }}><section className="timeline-detail-dialog" role="dialog" aria-modal="true" aria-labelledby={titleId}><header><div><p className="eyebrow">{kindLabel} · {formatLongDate(entry.occurredAt)} · {formatTime(entry.occurredAt)}</p><h2 id={titleId} aria-label={entry.titleTextAlternative ?? workoutTitleTextAlternative(entry.title)}>{entry.title}</h2></div><button ref={closeButton} className="icon-button" aria-label="Fechar detalhes" onClick={onClose}><X /></button></header>{entry.isMilestone && <p className="milestone-label"><Star size={14} fill="currentColor" /> Meu marco</p>}{entry.text && <p className="timeline-detail-text">{entry.text}</p>}{images.length > 0 && <TimelineRecordMedia key={entry.id} images={images} text={entry.text} />}{workout && <div className="timeline-workout-detail"><p className="timeline-workout-summary">{workoutDurationMinutes(workout)} min · {workout.items.length} {workout.items.length === 1 ? 'atividade' : 'atividades'}{workout.feeling ? ` · ${workout.feeling}` : ''}</p>{workout.items.map((item) => <section key={item.id}><h3>{item.exerciseName}</h3><p>{item.sets.filter((set) => set.completed).map((set) => formatSetSummary(set, item.metrics ?? defaultMetricsForMode(item.metricMode), loadUnit)).join(' · ') || 'Sem registros concluídos'}</p>{item.note && <small>{item.note}</small>}</section>)}</div>}</section></div>
+  return <div className="detail-dialog-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose() }}><section className="timeline-detail-dialog" role="dialog" aria-modal="true" aria-labelledby={titleId}><header><div><p className="eyebrow">{kindLabel} · {formatLongDate(entry.occurredAt)} · {formatTime(entry.occurredAt)}</p><h2 id={titleId} aria-label={entry.titleTextAlternative ?? workoutTitleTextAlternative(entry.title)}>{entry.title}</h2></div><button ref={closeButton} className="icon-button" aria-label="Fechar detalhes" onClick={onClose}><X /></button></header>{entry.isMilestone && <p className="milestone-label"><Star size={14} fill="currentColor" /> Meu marco</p>}{entry.text && <p className="timeline-detail-text">{entry.text}</p>}{images.length > 0 && <TimelineRecordMedia key={entry.id} images={images} text={entry.text} />}{workout && <div className="timeline-workout-detail"><p className="timeline-workout-summary">{workoutDurationMinutes(workout)} min · {workout.items.length} {workout.items.length === 1 ? 'atividade' : 'atividades'}{workout.feeling ? ` · ${workout.feeling}` : ''}</p><WorkoutRestHistory workout={workout} />{workout.items.map((item) => <section key={item.id}><h3>{item.exerciseName}</h3><p>{item.sets.filter((set) => set.completed).map((set) => formatSetSummary(set, item.metrics ?? defaultMetricsForMode(item.metricMode), workout.loadUnit ?? loadUnit)).join(' · ') || 'Sem registros concluídos'}</p>{item.note && <small>{item.note}</small>}</section>)}</div>}</section></div>
 }
 
 function ExercisesPage({ data, refresh, setNotice, allExercises, allTemplates }: SharedProps) {
@@ -1115,10 +1131,10 @@ function EvolutionPage({ data, allExercises }: { data: AppSnapshot; allExercises
   const completed = data.workouts.filter((workout) => workout.status === 'completed')
   const usedExercises = Array.from(new Set(completed.flatMap((workout) => workout.items.map((item) => item.exerciseId))))
   const [selected, setSelected] = useState(usedExercises[0] ?? '')
-  const points = exerciseProgress(data.workouts, selected)
+  const points = exerciseProgress(data.workouts, selected, data.profile.loadUnit)
   const maxValue = Math.max(...points.map((point) => point.value), 1)
   const selectedName = allExercises.find((exercise) => exercise.id === selected)?.name
-  return <div className="page evolution-page"><PageHeader variant="evolution" eyebrow="Sem pressa" title="Evolução" /><section className="month-summary"><p>Neste mês</p><strong>{thisMonthCount(data.workouts)}</strong><span>Treinos que você guardou</span><i /></section><div className="stat-strip"><div><strong>{completed.length}</strong><span>Treinos no total</span></div><div><strong>{totalCompletedSets(data.workouts)}</strong><span>Registros concluídos</span></div></div><section className="progress-section"><div className="section-heading"><div><p className="eyebrow">Carga por sessão</p><h2>Um exercício</h2></div></div>{usedExercises.length === 0 ? <div className="empty-gentle"><BarChart3 size={22} /><p>Registre alguns treinos para enxergar mudanças por aqui.</p></div> : <><label className="field compact"><span>Exercício</span><select value={selected} onChange={(event) => setSelected(event.target.value)}>{usedExercises.map((id) => <option key={id} value={id}>{allExercises.find((exercise) => exercise.id === id)?.name ?? id}</option>)}</select></label>{points.length === 0 ? <p className="chart-summary">Ainda não há cargas concluídas para este exercício.</p> : <><div className="mini-chart" role="img" aria-label={`Evolução da carga em ${selectedName}: ${points.map((point) => `${point.value} ${data.profile.loadUnit} em ${formatDay(point.date)}`).join(', ')}`}><span className="chart-max">{maxValue} {data.profile.loadUnit}</span><div className="chart-bars">{points.slice(-8).map((point) => <div key={point.date} style={{ height: `${Math.max(12, point.value / maxValue * 100)}%` }}><span>{point.value}</span></div>)}</div></div><p className="chart-summary">Maior carga registrada em {selectedName}: <strong>{maxValue} {data.profile.loadUnit}</strong>.</p></>}</>}</section><p className="little-note"><span>✦</span> Evolução também é voltar, ajustar e continuar</p></div>
+  return <div className="page evolution-page"><PageHeader variant="evolution" eyebrow="Sem pressa" title="Evolução" /><section className="month-summary"><p>Neste mês</p><strong>{thisMonthCount(data.workouts)}</strong><span>Treinos que você guardou</span><i /></section><div className="stat-strip"><div><strong>{completed.length}</strong><span>Treinos no total</span></div><div><strong>{totalCompletedSets(data.workouts)}</strong><span>Registros concluídos</span></div></div><section className="progress-section"><div className="section-heading"><div><p className="eyebrow">Carga por sessão</p><h2>Um exercício</h2></div></div>{usedExercises.length === 0 ? <div className="empty-gentle"><BarChart3 size={22} /><p>Registre alguns treinos para enxergar mudanças por aqui.</p></div> : <><label className="field compact"><span>Exercício</span><select value={selected} onChange={(event) => setSelected(event.target.value)}>{usedExercises.map((id) => <option key={id} value={id}>{allExercises.find((exercise) => exercise.id === id)?.name ?? id}</option>)}</select></label>{points.length === 0 ? <p className="chart-summary">Ainda não há cargas concluídas para este exercício.</p> : <><div className="mini-chart" role="img" aria-label={`Evolução da carga em ${selectedName}: ${points.map((point) => `${point.value} ${data.profile.loadUnit} em ${formatDay(point.date)}`).join(', ')}`}><span className="chart-max">{maxValue} {data.profile.loadUnit}</span><div className="chart-bars">{points.slice(-8).map((point) => <div key={point.date} style={{ height: `${Math.max(12, point.value / maxValue * 100)}%` }}><span>{point.value}</span></div>)}</div></div><p className="chart-summary">Maior carga registrada em {selectedName}: <strong>{maxValue} {data.profile.loadUnit}</strong>.</p></>}</>}</section></div>
 }
 
 function ProfilePage({ data, refresh, setNotice, installExperience }: SharedProps) {
@@ -1382,12 +1398,18 @@ function AppUpdateScreen({ flow, onRetry }: { flow: UpdateFlow; onRetry: () => v
 function WorkoutDetail({ data }: { data: AppSnapshot }) {
   const { id } = useParams(); const navigate = useNavigate(); const workout = data.workouts.find((item) => item.id === id)
   if (!workout) return <SimpleEmpty icon={<Dumbbell />} title="Treino não encontrado" />
-  return <div className="page detail-page"><header className="detail-top"><button className="icon-button" aria-label="Voltar" onClick={() => navigate(-1)}><ArrowLeft /></button></header><p className="eyebrow">{formatLongDate(workout.endedAt ?? workout.startedAt)}</p><h1 aria-label={workout.titleTextAlternative ?? workoutTitleTextAlternative(workout.title)}>{workout.title}</h1><p className="lead compact">{workoutDurationMinutes(workout)} min · {workout.items.length} atividades{workout.feeling ? ` · ${workout.feeling}` : ''}</p><div className="workout-detail-list">{workout.items.map((item) => <section key={item.id}><h2>{item.exerciseName}</h2><p>{item.sets.filter((set) => set.completed).map((set) => formatSetSummary(set, item.metrics ?? defaultMetricsForMode(item.metricMode), data.profile.loadUnit)).join('  ·  ') || 'Sem registros concluídos'}</p>{item.note && <small>{item.note}</small>}</section>)}</div></div>
+  return <div className="page detail-page"><header className="detail-top"><button className="icon-button" aria-label="Voltar" onClick={() => navigate(-1)}><ArrowLeft /></button></header><p className="eyebrow">{formatLongDate(workout.endedAt ?? workout.startedAt)}</p><h1 aria-label={workout.titleTextAlternative ?? workoutTitleTextAlternative(workout.title)}>{workout.title}</h1><p className="lead compact">{workoutDurationMinutes(workout)} min · {workout.items.length} atividades{workout.feeling ? ` · ${workout.feeling}` : ''}</p><div className="workout-detail-list"><WorkoutRestHistory workout={workout} />{workout.items.map((item) => <section key={item.id}><h2>{item.exerciseName}</h2><p>{item.sets.filter((set) => set.completed).map((set) => formatSetSummary(set, item.metrics ?? defaultMetricsForMode(item.metricMode), workout.loadUnit ?? data.profile.loadUnit)).join('  ·  ') || 'Sem registros concluídos'}</p>{item.note && <small>{item.note}</small>}</section>)}</div></div>
+}
+
+function WorkoutRestHistory({ workout }: { workout: Workout }) {
+  if (!workout.rests?.length) return null
+  const total = workout.rests.reduce((sum, rest) => sum + (rest.actualSeconds ?? 0), 0)
+  return <details className="rest-history"><summary>{workout.rests.length} descansos · {formatTimer(total)} no total</summary><ol>{workout.rests.map(rest => <li key={rest.id}><strong>{rest.exerciseName}</strong><small>{formatTime(rest.startedAt)} · Previsto {formatTimer(rest.plannedSeconds)} · Realizado {formatTimer(rest.actualSeconds ?? 0)} · {rest.outcome === 'completed' ? 'Concluído' : rest.outcome === 'interrupted' ? 'Encerrado antes' : 'Em andamento'}</small></li>)}</ol></details>
 }
 
 function BottomNav() {
   const items = [
-    { to: '/', label: 'Hoje', icon: Home }, { to: '/linha', label: 'Linha', icon: TimelinePathIcon },
+    { to: '/', label: 'Início', icon: Home }, { to: '/linha', label: 'Linha', icon: TimelinePathIcon },
     { to: '/exercicios', label: 'Biblioteca', icon: BookOpen }, { to: '/evolucao', label: 'Evolução', icon: BarChart3 }, { to: '/eu', label: 'Eu', icon: UserRound },
   ]
   return <nav className="bottom-nav" aria-label="Navegação principal">{items.map(({ to, label, icon: Icon }) => <NavLink key={to} to={to} end={to === '/'}><Icon size={21} /><span>{label}</span></NavLink>)}</nav>
@@ -1403,17 +1425,31 @@ function FloatingAddButton({ tone, label, onClick }: { tone: 'pink' | 'blue'; la
 
 function ConfirmDialog({ open, title, confirmLabel, tone = 'default', busy = false, onClose, onConfirm, children }: { open: boolean; title: string; confirmLabel: string; tone?: 'default' | 'danger'; busy?: boolean; onClose: () => void; onConfirm: () => void; children: ReactNode }) {
   const titleId = useId()
+  const closeRef = useRef(onClose)
+  const busyRef = useRef(busy)
+  useEffect(() => { closeRef.current = onClose; busyRef.current = busy }, [onClose, busy])
   useEffect(() => {
     if (!open) return
     const previousOverflow = document.body.style.overflow
     document.body.style.overflow = 'hidden'
-    const onKeyDown = (event: KeyboardEvent) => { if (event.key === 'Escape' && !busy) onClose() }
+    const previousFocus = document.activeElement as HTMLElement | null
+    const modal = document.getElementById(titleId)?.closest<HTMLElement>('[role="dialog"]')
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape' && !busyRef.current) closeRef.current()
+      if (event.key !== 'Tab' || !modal) return
+      const controls = [...modal.querySelectorAll<HTMLElement>('button:not(:disabled), input:not(:disabled), select:not(:disabled), textarea:not(:disabled), [tabindex="0"]')]
+      const first = controls[0], last = controls.at(-1)
+      if (!first || !last) return
+      if (event.shiftKey && (document.activeElement === first || !modal.contains(document.activeElement))) { event.preventDefault(); last.focus() }
+      if (!event.shiftKey && (document.activeElement === last || !modal.contains(document.activeElement))) { event.preventDefault(); first.focus() }
+    }
     window.addEventListener('keydown', onKeyDown)
     return () => {
       document.body.style.overflow = previousOverflow
       window.removeEventListener('keydown', onKeyDown)
+      if (previousFocus?.isConnected) previousFocus.focus()
     }
-  }, [open, busy, onClose])
+  }, [open, titleId])
   if (!open) return null
   return <div className="dialog-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget && !busy) onClose() }}><section className="confirm-dialog" role="dialog" aria-modal="true" aria-labelledby={titleId}><span className={`dialog-stroke ${tone}`} aria-hidden="true" /><h2 id={titleId}>{title}</h2><div className="dialog-copy">{children}</div><div className="dialog-actions"><button className="dialog-cancel" autoFocus disabled={busy} onClick={onClose}>Voltar</button><button className={tone === 'danger' ? 'dialog-confirm danger' : 'dialog-confirm'} disabled={busy} onClick={onConfirm}>{busy ? 'Aguarde…' : confirmLabel}</button></div></section></div>
 }
@@ -1522,7 +1558,7 @@ function isLikelyHeic(file: File) {
 }
 
 function formatSetSummary(set: WorkoutSet, metrics: WorkoutMetric[], unit: Profile['loadUnit']) {
-  return metrics.map((metric) => {
+  return (set.metrics ?? metrics).map((metric) => {
     if (metric === 'load') return `${formatLocalizedNumber(set.load)} ${unit}`
     if (metric === 'reps') return `${formatLocalizedNumber(set.reps)} reps`
     if (metric === 'distance') return `${formatLocalizedNumber(set.distanceKm)} km`

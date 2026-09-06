@@ -156,6 +156,17 @@ export async function saveProfile(profile: Profile) {
   await db.profiles.put(profile)
 }
 
+/** Read/modify/write is serialized by IndexedDB, including edits in another tab. */
+export async function mutateActiveWorkout(id: string, change: (workout: Workout) => Workout) {
+  return db.transaction('rw', db.workouts, async () => {
+    const latest = await db.workouts.get(id)
+    if (!latest || latest.status !== 'active') throw new Error('Este treino não está mais em andamento.')
+    const next = change(latest)
+    await db.workouts.put(next)
+    return next
+  })
+}
+
 export async function clearAllData() {
   await db.transaction('rw', [db.workouts, db.timeline, db.favorites, db.customExercises, db.customTemplates, db.profiles], async () => {
     await Promise.all([

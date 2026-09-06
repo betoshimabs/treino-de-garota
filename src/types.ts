@@ -51,6 +51,22 @@ export interface WorkoutSet {
   distanceKm?: number
   durationMinutes?: number
   completed: boolean
+  completedAt?: string
+  metrics?: WorkoutMetric[]
+}
+
+export interface WorkoutRest {
+  id: string
+  itemId: string
+  exerciseName: string
+  setId?: string
+  startedAt: string
+  plannedSeconds: number
+  initialPlannedSeconds?: number
+  adjustments?: { at: string; deltaSeconds: number }[]
+  endedAt?: string
+  actualSeconds?: number
+  outcome?: 'completed' | 'interrupted'
 }
 
 export interface WorkoutItem {
@@ -81,6 +97,9 @@ export interface Workout {
   feeling?: Feeling
   note?: string
   restSeconds?: number
+  rests?: WorkoutRest[]
+  currentItemId?: string
+  loadUnit?: LoadUnit
 }
 
 export interface WorkoutTemplate {

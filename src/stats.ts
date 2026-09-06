@@ -1,5 +1,5 @@
-import type { Workout } from './types'
-import { defaultMetricsForMode } from './domain'
+import type { LoadUnit, Workout } from './types'
+import { defaultMetricsForMode, kgToLb, lbToKg } from './domain'
 
 export function completedWorkouts(workouts: Workout[]) {
   return workouts.filter((workout) => workout.status === 'completed')
@@ -24,14 +24,18 @@ export function workoutDurationMinutes(workout: Workout) {
   return Math.max(1, Math.round((new Date(workout.endedAt).getTime() - new Date(workout.startedAt).getTime()) / 60000))
 }
 
-export function exerciseProgress(workouts: Workout[], exerciseId: string) {
+export function exerciseProgress(workouts: Workout[], exerciseId: string, unit?: LoadUnit) {
   return completedWorkouts(workouts)
     .map((workout) => {
       const loads = workout.items
-        .filter((item) => item.exerciseId === exerciseId && (item.metrics ?? defaultMetricsForMode(item.metricMode)).includes('load'))
-        .flatMap((item) => item.sets)
+        .filter((item) => item.exerciseId === exerciseId)
+        .flatMap((item) => item.sets.filter(set => (set.metrics ?? item.metrics ?? defaultMetricsForMode(item.metricMode)).includes('load')))
         .filter((set) => set.completed && typeof set.load === 'number')
-        .map((set) => set.load as number)
+        .map((set) => {
+          const value = set.load as number
+          if (!unit || !workout.loadUnit || unit === workout.loadUnit) return value
+          return Math.round((unit === 'kg' ? lbToKg(value) : kgToLb(value)) * 100) / 100
+        })
       if (!loads.length) return null
       return { date: workout.endedAt ?? workout.startedAt, value: Math.max(...loads) }
     })
