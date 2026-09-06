@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { adjustRest, closeRest, copySetForNextSeries, nextCreatedItem, recordGuidedSet, settleRests } from './workout-guide'
+import { adjustRest, advanceWorkout, closeRest, copySetForNextSeries, nextCreatedItem, recordGuidedSet, settleRests } from './workout-guide'
 import type { Workout, WorkoutRest } from './types'
 
 const workout: Workout = { id: 'w', title: 'Teste', status: 'active', startedAt: '2026-09-06T12:00:00Z', items: [
@@ -8,6 +8,14 @@ const workout: Workout = { id: 'w', title: 'Teste', status: 'active', startedAt:
 ] }
 const rest: WorkoutRest = { id: 'r', itemId: 'a', exerciseName: 'Corrida', startedAt: '2026-09-06T12:00:00Z', plannedSeconds: 90 }
 describe('Guia de treino', () => {
+  it('recupera exercícios pulados mantendo completos antes dos pendentes', () => {
+    const last = { ...workout.items[1], sets: [{ id: 'done', completed: true, reps: 10 }] }
+    const ordered = advanceWorkout({ ...workout, currentItemId: last.id, items: [workout.items[0], last] })
+    expect(ordered.items.map(item => item.id)).toEqual(['b', 'a'])
+    expect(ordered.currentItemId).toBe('a')
+    expect(ordered.items[0]).toBe(last)
+    expect(advanceWorkout(ordered).items).toEqual(ordered.items)
+  })
   it('nova série copia valores, mas não conclusão, horário ou métricas antigas', () => {
     const copy = copySetForNextSeries({ id: 'previous', completed: true, completedAt: rest.startedAt, metrics: ['load', 'reps'], load: 15, reps: 12, distanceKm: 2, durationMinutes: 10 })
     expect(copy).toMatchObject({ completed: false, load: 15, reps: 12, distanceKm: 2, durationMinutes: 10 })
@@ -16,11 +24,18 @@ describe('Guia de treino', () => {
     expect(copy.metrics).toBeUndefined()
     expect(copySetForNextSeries().load).toBeUndefined()
   })
-  it('concluir inicia 30 segundos de descanso vinculado à série sem duplicar', () => {
+  it('concluir inicia 90 segundos de descanso vinculado à série sem duplicar', () => {
     const saved = recordGuidedSet({ ...workout, rests: [rest] }, 'a', { id: 's', completed: false, reps: 10 }, ['reps'], '2026-09-06T12:00:20Z')
     expect(saved.rests?.[0]).toMatchObject({ actualSeconds: 20, outcome: 'interrupted' })
-    expect(saved.rests?.[1]).toMatchObject({ itemId: 'a', setId: 's', plannedSeconds: 30, startedAt: '2026-09-06T12:00:20Z' })
+    expect(saved.rests?.[1]).toMatchObject({ itemId: 'a', setId: 's', plannedSeconds: 90, startedAt: '2026-09-06T12:00:20Z' })
     expect(recordGuidedSet(saved, 'a', saved.items[0].sets[0], ['reps'], '2026-09-06T12:00:21Z')).toBe(saved)
+  })
+  it('copiar e concluir preservam a unidade da série mesmo com outra preferência', () => {
+    const copy = copySetForNextSeries({ id: 'previous', completed: true, load: 20, reps: 10, loadUnit: 'lb' })
+    expect(copy.loadUnit).toBe('lb')
+    const saved = recordGuidedSet(workout, 'a', copy, ['load', 'reps'], rest.startedAt, 'kg')
+    expect(saved.items[0].sets.find(set => set.id === copy.id)?.loadUnit).toBe('lb')
+    expect(saved.loadUnit).toBe(workout.loadUnit)
   })
   it('ajusta o prazo sem reiniciar a pausa e preserva a escolha inicial', () => {
     const now = Date.parse(rest.startedAt) + 20_000

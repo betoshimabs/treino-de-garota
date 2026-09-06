@@ -1,5 +1,5 @@
-import type { Workout, WorkoutRest, WorkoutSet, WorkoutMetric } from './types'
-import { isSetValidForMetrics } from './domain'
+import type { Workout, WorkoutRest, WorkoutSet, WorkoutMetric, WorkoutItem, LoadUnit } from './types'
+import { defaultMetricsForMode, isSetValidForMetrics } from './domain'
 
 export function closeRest(rest: WorkoutRest, now: number): WorkoutRest {
   if (rest.endedAt) return rest
@@ -26,15 +26,15 @@ export function adjustRest(workout: Workout, restId: string, delta: -15 | 15, no
   }) }
 }
 
-export function recordGuidedSet(workout: Workout, itemId: string, set: WorkoutSet, metrics: WorkoutMetric[], now: string): Workout {
+export function recordGuidedSet(workout: Workout, itemId: string, set: WorkoutSet, metrics: WorkoutMetric[], now: string, unit = workout.loadUnit): Workout {
   if (!isSetValidForMetrics(set, metrics)) throw new Error('Preencha todas as medidas escolhidas com valores maiores que zero.')
   const item = workout.items.find(row => row.id === itemId)
   if (!item) throw new Error('Este exercício foi removido. Escolha outro para continuar.')
   const existing = item.sets.find(row => row.id === set.id)
   if (existing?.completed) return workout
-  const completed = { ...set, metrics: [...metrics], completed: true, completedAt: now }
+  const completed = { ...set, metrics: [...metrics], completed: true, completedAt: now, loadUnit: set.loadUnit ?? unit }
   const settled = settleRests(workout, Date.parse(now), true)
-  return { ...settled, rests: [...(settled.rests ?? []), { id: crypto.randomUUID(), itemId, exerciseName: item.exerciseName, setId: set.id, startedAt: now, plannedSeconds: 30 }], items: workout.items.map(row => row.id !== itemId ? row : { ...row, metrics, sets: existing ? row.sets.map(entry => entry.id === set.id ? completed : entry) : [...row.sets, completed] }) }
+  return { ...settled, rests: [...(settled.rests ?? []), { id: crypto.randomUUID(), itemId, exerciseName: item.exerciseName, setId: set.id, startedAt: now, plannedSeconds: 90 }], items: workout.items.map(row => row.id !== itemId ? row : { ...row, metrics, sets: existing ? row.sets.map(entry => entry.id === set.id ? completed : entry) : [...row.sets, completed] }) }
 }
 
 export function nextCreatedItem(workout: Workout, itemId: string) {
@@ -43,5 +43,25 @@ export function nextCreatedItem(workout: Workout, itemId: string) {
 }
 
 export function copySetForNextSeries(previous?: WorkoutSet): WorkoutSet {
-  return { id: crypto.randomUUID(), completed: false, load: previous?.load, reps: previous?.reps, distanceKm: previous?.distanceKm, durationMinutes: previous?.durationMinutes }
+  return { id: crypto.randomUUID(), completed: false, load: previous?.load, loadUnit: previous?.loadUnit, reps: previous?.reps, distanceKm: previous?.distanceKm, durationMinutes: previous?.durationMinutes }
+}
+
+export const itemFinished = (item: WorkoutItem) => item.sets.length > 0 && item.sets.every(set => set.completed)
+
+export function advanceWorkout(workout: Workout): Workout {
+  const items = [...workout.items.filter(itemFinished), ...workout.items.filter(item => !itemFinished(item))]
+  return { ...workout, items, currentItemId: items.find(item => !itemFinished(item))?.id ?? workout.currentItemId }
+}
+
+export function restTotal(workout: Workout, itemId?: string, now = Date.now()): number {
+  return (workout.rests ?? []).filter(rest => !itemId || rest.itemId === itemId).reduce((sum, rest) => sum + (rest.endedAt ? rest.actualSeconds ?? 0 : closeRest(rest, now).actualSeconds ?? 0), 0)
+}
+
+export function completedItemSummary(item: WorkoutItem, unit: LoadUnit): string {
+  const sets = item.sets.filter(set => set.completed)
+  const measures = sets.map(set => (set.metrics ?? item.metrics ?? defaultMetricsForMode(item.metricMode)).map(metric => {
+    const value = metric === 'load' ? set.load : metric === 'reps' ? set.reps : metric === 'distance' ? set.distanceKm : set.durationMinutes
+    return value === undefined ? '' : `${value.toLocaleString('pt-BR')} ${metric === 'load' ? set.loadUnit ?? unit : metric === 'reps' ? 'reps' : metric === 'distance' ? 'km' : 'min'}`
+  }).filter(Boolean).join(' × '))
+  return `${sets.length} ${item.category === 'strength' ? (sets.length === 1 ? 'série' : 'séries') : (sets.length === 1 ? 'registro' : 'registros')}${measures.some(Boolean) ? ` · ${[...new Set(measures.filter(Boolean))].join(' / ')}` : ''}`
 }

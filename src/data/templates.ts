@@ -1,32 +1,21 @@
-import type { WorkoutTemplate } from '../types'
+import type { ExperienceLevel, TrainingFocus, WorkoutTemplate } from '../types'
 
+const template = (id: string, name: string, level: ExperienceLevel, focus: TrainingFocus, intention: string, exerciseIds: string[], preparation: string): WorkoutTemplate => ({
+  id, name, level, focus, intention, exerciseIds, preparation, origin: 'system', note: `${level} · ${focus} · ${exerciseIds.length} atividades`,
+})
+
+// Editable session outlines, not a weekly program or individually prescribed dosage.
 export const systemTemplates: WorkoutTemplate[] = [
-  {
-    id: 'template-pernas-base',
-    name: 'Pernas — base',
-    note: '5 exercícios · musculação',
-    exerciseIds: ['agachamento-livre', 'leg-press', 'cadeira-extensora', 'mesa-flexora', 'panturrilha-em-pe'],
-    origin: 'system',
-  },
-  {
-    id: 'template-gluteos-posterior',
-    name: 'Glúteos + posterior',
-    note: '5 exercícios · musculação',
-    exerciseIds: ['elevacao-pelvica', 'stiff', 'cadeira-flexora', 'gluteo-cabo', 'cadeira-abdutora'],
-    origin: 'system',
-  },
-  {
-    id: 'template-superiores',
-    name: 'Superiores completo',
-    note: '6 exercícios · musculação',
-    exerciseIds: ['supino-halteres', 'puxada-frente', 'remada-baixa', 'desenvolvimento', 'rosca-martelo', 'triceps-corda'],
-    origin: 'system',
-  },
-  {
-    id: 'template-misto-leve',
-    name: 'Misto + cardio leve',
-    note: '4 exercícios · duas modalidades',
-    exerciseIds: ['agachamento-livre', 'puxada-frente', 'elevacao-lateral', 'esteira'],
-    origin: 'system',
-  },
+  template('template-corpo-primeiros-passos', 'Primeiros movimentos', 'Iniciante', 'Corpo inteiro', 'Conhecer apoios e registrar o que funciona para você.', ['leg-press', 'supino-halteres', 'puxada-frente', 'cadeira-flexora', 'dead-bug'], 'Confira os ajustes dos aparelhos com alguém da equipe. Séries, carga e descanso são escolhas suas.'),
+  template('template-pernas-base', 'Pernas, por partes', 'Iniciante', 'Inferiores', 'Trabalhar joelhos, quadris e tornozelos com apoios estáveis.', ['leg-press', 'cadeira-flexora', 'cadeira-extensora', 'cadeira-abdutora', 'panturrilha-sentada'], 'Ajuste cada máquina antes da primeira série. Substitui a antiga seleção “Pernas — base”.'),
+  template('template-superiores', 'Puxa daqui, empurra dali', 'Iniciante', 'Superiores', 'Um encontro com peito, costas, ombros e braços.', ['supino-halteres', 'puxada-frente', 'remada-baixa', 'desenvolvimento', 'rosca-martelo', 'triceps-corda'], 'Comece pelos movimentos maiores. Remova acessórios se quiser uma sessão mais curta.'),
+  template('template-misto-leve', 'Um pouco de cada', 'Iniciante', 'Corpo inteiro', 'Força e caminhada na mesma página, sem uma intensidade imposta.', ['agachamento-goblet', 'supino-halteres', 'remada-baixa', 'esteira'], 'O antigo “Misto + cardio leve” agora deixa o esforço para você registrar ao terminar.'),
+  template('template-gluteos-posterior', 'Quadril em movimento', 'Intermediário', 'Inferiores', 'Extensão de quadril, flexão de joelhos e trabalho lateral dos glúteos.', ['elevacao-pelvica', 'stiff', 'cadeira-flexora', 'gluteo-cabo', 'cadeira-abdutora'], 'Familiaridade com a dobradiça de quadril e a preparação da barra ajuda. Não é uma promessa de mudança corporal.'),
+  template('template-inferiores-equilibrio', 'Pernas em dois apoios', 'Intermediário', 'Inferiores', 'Combinar movimentos bilaterais e unilaterais com espaço para adutores e panturrilhas.', ['agachamento-livre', 'afundo', 'mesa-flexora', 'cadeira-adutora', 'panturrilha-em-pe'], 'No afundo, registre repetições por lado. Ajuste a quantidade de séries à sua rotina.'),
+  template('template-superiores-angulos', 'Outros ângulos', 'Intermediário', 'Superiores', 'Explorar empurradas inclinadas, puxadas e controle dos ombros.', ['supino-inclinado-halteres', 'barra-fixa-assistida', 'remada-unilateral', 'face-pull', 'elevacao-lateral'], 'No gravitron, a carga representa ajuda. Em halteres, registre o peso de cada halter.'),
+  template('template-core-controle', 'Centro, com controle', 'Intermediário', 'Core', 'Alternar controle do tronco, sustentação frontal e lateral.', ['dead-bug', 'abdominal-prancha', 'prancha-lateral'], 'A sustentação termina quando o alinhamento se perde. Nas pranchas, mais tempo não é a única forma de progresso.'),
+  template('template-inferiores-livres', 'Barra, banco e equilíbrio', 'Avançado', 'Inferiores', 'Uma seleção de coordenação mais exigente, com terra e apoio unilateral.', ['terra-convencional', 'agachamento-bulgaro', 'cadeira-extensora', 'panturrilha-sentada'], 'Use quando já conhece a preparação do terra e o equilíbrio do búlgaro. Avançado não significa treinar até a falha.'),
+  template('template-superiores-autonomia', 'Superiores, do seu jeito', 'Avançado', 'Superiores', 'Organizar movimentos livres e assistência ajustável com autonomia de execução.', ['supino-reto', 'barra-fixa-assistida', 'remada-unilateral', 'desenvolvimento', 'triceps-frances'], 'Prepare travas, banco e entrada dos halteres. O nível descreve familiaridade, não uma meta de carga.'),
+  template('template-cardio-escolhas', 'Ritmos da academia', 'Iniciante', 'Cardio', 'Caminhada e bicicleta para registrar dois tipos de movimento, sem disputar velocidade.', ['esteira', 'bicicleta'], 'Escolha duração e ritmo confortáveis. Distâncias de aparelhos distintos ficam separadas na Evolução.'),
+template('template-sem-aparelhos', 'Seu espaço, seu movimento', 'Intermediário', 'Superiores', 'Uma seleção curta sem máquinas, com empurrada e controle do tronco.', ['flexao-bracos', 'dead-bug', 'prancha-lateral', 'mobilidade'], 'Precisa apenas de um chão estável e espaço. Adapte ou remova qualquer movimento que não se encaixe no dia.'),
 ]

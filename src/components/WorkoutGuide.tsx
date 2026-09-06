@@ -1,8 +1,9 @@
 import { useEffect, useRef, useState } from 'react'
 import { ArrowRight, Check, Pause, Plus, X } from 'lucide-react'
 import { mutateActiveWorkout } from '../db'
+import { recordingHint } from '../data/catalog-review'
 import { defaultMetricsForMode, isSetValidForMetrics, parseLocalizedNumber, workoutMetricOrder } from '../domain'
-import { adjustRest, copySetForNextSeries, nextCreatedItem, recordGuidedSet, settleRests } from '../workout-guide'
+import { adjustRest, advanceWorkout, completedItemSummary, copySetForNextSeries, itemFinished, recordGuidedSet, restTotal, settleRests } from '../workout-guide'
 import type { LoadUnit, Workout, WorkoutItem, WorkoutMetric, WorkoutSet } from '../types'
 
 const timer = (seconds: number) => `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, '0')}`
@@ -23,6 +24,7 @@ export function WorkoutGuide({ workout, unit, refresh, onFocus, onAdd, onFinish 
   const lock = useRef(false)
   const dialog = useRef<HTMLDialogElement>(null)
   const item = workout.items.find(row => row.id === workout.currentItemId) ?? workout.items[0]
+  const draftItem = workout.items.find(row => row.id === draft?.itemId)
   const index = workout.items.findIndex(row => row.id === item?.id)
   const rest = workout.rests?.find(row => !row.endedAt)
   const remaining = rest ? Math.max(0, Math.ceil((Date.parse(rest.startedAt) + rest.plannedSeconds * 1000 - now) / 1000)) : 0
@@ -61,7 +63,7 @@ export function WorkoutGuide({ workout, unit, refresh, onFocus, onAdd, onFinish 
     const set = pending ?? { id: crypto.randomUUID(), completed: false }
     const metrics = selected.metrics ?? defaultMetricsForMode(selected.metricMode)
     if (isSetValidForMetrics(set, metrics)) {
-      await mutateActiveWorkout(workout.id, row => ({ ...recordGuidedSet(row, selected.id, set, metrics, new Date().toISOString()), loadUnit: row.loadUnit ?? unit }))
+      await mutateActiveWorkout(workout.id, row => recordGuidedSet(row, selected.id, set, metrics, new Date().toISOString(), unit))
       setNow(Date.now()); setMode(null)
     } else { setDraft(previous => previous?.set.id === set.id ? previous : prepare(selected, set)); setMode('record') }
     await refresh()
@@ -70,7 +72,7 @@ export function WorkoutGuide({ workout, unit, refresh, onFocus, onAdd, onFinish 
     if (!draft) return
     const set = { ...draft.set }
     for (const metric of draft.metrics) set[keys[metric]] = parseLocalizedNumber(draft.values[metric] ?? '')
-    await mutateActiveWorkout(workout.id, row => ({ ...recordGuidedSet(row, draft.itemId, set, draft.metrics, new Date().toISOString()), loadUnit: row.loadUnit ?? unit }))
+    await mutateActiveWorkout(workout.id, row => recordGuidedSet(row, draft.itemId, set, draft.metrics, new Date().toISOString(), unit))
     setNow(Date.now()); await refresh(); setMode(null)
   })
   const anotherSet = () => void run(async () => {
@@ -88,8 +90,9 @@ export function WorkoutGuide({ workout, unit, refresh, onFocus, onAdd, onFinish 
       const selected = row.items.find(candidate => candidate.id === item.id)
       const pending = selected?.sets.find(set => !set.completed)
       if (selected && pending) { pendingDraft = prepare(selected, pending); return row }
-      target = nextCreatedItem(row, item.id)
-      return { ...row, currentItemId: target?.id ?? row.currentItemId }
+      const ordered = advanceWorkout(row)
+      target = ordered.items.find(candidate => !itemFinished(candidate))
+      return ordered
     })
     if (pendingDraft) { setDraft(pendingDraft); setMode('record') }
     else { setMode(null); if (!target) onAdd() }
@@ -116,6 +119,7 @@ export function WorkoutGuide({ workout, unit, refresh, onFocus, onAdd, onFinish 
   })
   return <>
     <aside className={`workout-guide${rest ? ' is-resting' : ''}`} aria-label="Controles do treino">
+      {workout.items.length > 0 && <nav className="workout-stepper" aria-label="Sequência do treino"><p>Sequência do treino</p><div>{workout.items.map((entry, position) => <button type="button" key={entry.id} disabled={busy} className={`${entry.id === item?.id ? 'current' : ''} ${itemFinished(entry) ? 'complete' : ''}`} title={entry.exerciseName} aria-label={`${position + 1}. ${entry.exerciseName}, ${itemFinished(entry) ? 'concluído' : 'pendente'}`} aria-current={entry.id === item?.id ? 'step' : undefined} onClick={() => onFocus(entry)}><span>{itemFinished(entry) ? <Check size={14} /> : position + 1}</span><small>{entry.exerciseName}</small></button>)}</div></nav>}
       {rest ? <>
         <div className="guide-rest-label" role="status"><Pause size={16} /> Em descanso</div>
         <div className="guide-rest-clock">
@@ -136,20 +140,21 @@ export function WorkoutGuide({ workout, unit, refresh, onFocus, onAdd, onFinish 
       {error && <p role="alert" className="guide-error">{error}</p>}
       {mode === 'record' && draft && <form onSubmit={event => { event.preventDefault(); done() }}>
         <p>{workout.items.find(row => row.id === draft.itemId)?.exerciseName}</p>
+        {draftItem?.analysis && <p className="recording-hint">{recordingHint(draftItem.analysis)}</p>}
         <div className="guide-metrics" role="group" aria-label="Medidas para registrar">{workoutMetricOrder.map(metric => <button disabled={busy} type="button" key={metric} aria-pressed={draft.metrics.includes(metric)} onClick={() => setDraft(current => {
           if (!current) return current
           const metrics = current.metrics.includes(metric) ? current.metrics.filter(value => value !== metric) : workoutMetricOrder.filter(value => value === metric || current.metrics.includes(value))
           return metrics.length ? { ...current, metrics } : current
         })}>{({ load: 'Carga', reps: 'Reps', distance: 'Distância', duration: 'Tempo' })[metric]}{draft.metrics.includes(metric) && <Check size={12} />}</button>)}</div>
-        <div className="guide-fields">{draft.metrics.map(metric => <label className="field" key={metric}><span>{metric === 'load' ? `Carga (${unit})` : labels[metric]}</span><input disabled={busy} required inputMode="decimal" value={draft.values[metric] ?? ''} onChange={event => setDraft({ ...draft, values: { ...draft.values, [metric]: event.target.value } })} /></label>)}</div>
+        <div className="guide-fields">{draft.metrics.map(metric => <label className="field" key={metric}><span>{metric === 'load' ? `Carga (${draft.set.loadUnit ?? unit})` : labels[metric]}</span><input disabled={busy} required inputMode="decimal" value={draft.values[metric] ?? ''} onChange={event => setDraft({ ...draft, values: { ...draft.values, [metric]: event.target.value } })} /></label>)}</div>
         <button className="primary-button wide" disabled={busy}><Check size={18} /> Feito</button>
       </form>}
-      {mode === 'choice' && <><p className="guide-context">{item?.exerciseName}</p><div className="guide-choices"><button disabled={busy} onClick={anotherSet}><Plus size={20} /><span>Nova série<small>Com os valores da anterior</small></span></button><button disabled={busy} onClick={advance}><ArrowRight size={20} /><span>Próximo exercício<small>{item && nextCreatedItem(workout, item.id)?.exerciseName || 'Escolher outro para adicionar'}</small></span></button><button disabled={busy} onClick={() => void run(async () => { await onFinish(); setMode(null) })}><Check size={20} /><span>Finalizar treino<small>Rever e guardar na sua linha</small></span></button></div></>}
+      {mode === 'choice' && <><p className="guide-context">{item?.exerciseName}{item && <small>{completedItemSummary(item, unit)}<br />{timer(restTotal(workout, item.id))} de descanso</small>}</p><div className="guide-choices"><button disabled={busy} onClick={anotherSet}><Plus size={18} /><span>Nova série</span></button><button disabled={busy} onClick={advance}><ArrowRight size={18} /><span>Próximo exercício</span></button><button disabled={busy} onClick={() => void run(async () => { await onFinish(); setMode(null) })}><Check size={18} /><span>Finalizar treino</span></button></div></>}
       {mode === 'rest' && <>
         {rest && <><p role="status">Descanso em andamento: {timer(remaining)}</p><button className="secondary-button" disabled={busy} onClick={() => void run(async () => { await mutateActiveWorkout(workout.id, row => settleRests(row, Date.now(), true)); await refresh(); setMode(null) })}>Encerrar descanso</button></>}
-        <label className="field"><span>{rest ? 'Duração de um novo descanso' : 'Quanto tempo?'} — {timer(seconds)}</span><input type="range" min="15" max="180" step="15" value={seconds} onChange={event => setSeconds(Number(event.target.value))} /></label>
+        <p>Quanto tempo de pausa?</p>
         <div className="guide-presets">{[15, 30, 60, 90, 120, 180].map(value => <button key={value} aria-pressed={seconds === value} onClick={() => setSeconds(value)}>{timer(value)}</button>)}</div>
-        <button className="primary-button wide" disabled={busy} onClick={startRest}><Pause size={18} /> {rest ? 'Reiniciar descanso' : 'Iniciar descanso'}</button>
+        <button className="primary-button wide" disabled={busy} onClick={startRest}>{rest ? 'Reiniciar descanso' : 'Iniciar descanso'}</button>
       </>}
     </dialog>
   </>

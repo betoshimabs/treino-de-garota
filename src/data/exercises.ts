@@ -1,5 +1,7 @@
 import type { Exercise } from '../types'
 import { exerciseCatalogDetails } from './exerciseCatalogDetails'
+import { applyCatalogReview } from './catalog-review'
+import { catalogAdditions } from './catalog-additions'
 
 const makeExercise = (
   id: string,
@@ -21,7 +23,7 @@ const makeExercise = (
   metricMode: options.metricMode ?? 'load-reps',
   visual: options.visual ?? visualFor(id),
   media: options.media ?? exerciseCatalogDetails[id]?.media,
-  curation: options.curation ?? exerciseCatalogDetails[id]?.curation,
+  curation: exerciseCatalogDetails[id]?.curation ?? options.curation,
 })
 
 const exerciseMediaUrl = (path: string) => `${import.meta.env.BASE_URL}exercise-media/${path}`
@@ -39,26 +41,12 @@ function visualFor(id: string): Exercise['visual'] {
   return 'flow'
 }
 
-export const exercises: Exercise[] = [
+const originalExercises: Exercise[] = [
   makeExercise('agachamento-livre', 'Agachamento livre', ['agachamento', 'squat', 'barbell back squat'], 'Pernas', 'Barra', ['Prepare o tronco e apoie a barra na parte alta das costas.', 'Desça entre os quadris mantendo os pés inteiros apoiados.', 'Suba mantendo os joelhos na mesma direção dos pés.'], {
     media: {
       posterSrc: exerciseMediaUrl('agachamento-livre/poster.webp'),
       motionSrc: exerciseMediaUrl('agachamento-livre/movimento.webp'),
       alt: 'A personagem demonstra o agachamento com barra, alternando entre a posição em pé e a posição baixa.',
-    },
-    curation: {
-      primaryMuscles: ['Quadríceps'],
-      secondaryMuscles: ['Glúteos', 'Posteriores de coxa', 'Lombar'],
-      movementPattern: 'Agachamento',
-      stimulusToFatigue: 'moderado',
-      suggestedRepRange: { minimum: 6, maximum: 10 },
-      reviewStatus: 'em-revisao',
-      source: {
-        name: 'ExerciseAPI',
-        recordId: 'barbell_back_squat',
-        url: 'https://exercise-api.com/v1/exercises/barbell_back_squat',
-        license: 'CC BY 4.0',
-      },
     },
   }),
   makeExercise('leg-press', 'Leg press', ['leg 45', 'prensa'], 'Pernas', 'Máquina', ['Apoie toda a lombar.', 'Desça até onde mantém o quadril estável.', 'Empurre sem travar os joelhos.'], {
@@ -66,20 +54,6 @@ export const exercises: Exercise[] = [
       posterSrc: exerciseMediaUrl('leg-press/poster.webp'),
       motionSrc: exerciseMediaUrl('leg-press/movimento.webp'),
       alt: 'A personagem demonstra o leg press inclinado, alternando entre a posição flexionada e a extensão confortável das pernas.',
-    },
-    curation: {
-      primaryMuscles: ['Quadríceps'],
-      secondaryMuscles: ['Glúteos', 'Posteriores de coxa'],
-      movementPattern: 'Empurrar com as pernas',
-      stimulusToFatigue: 'moderado',
-      suggestedRepRange: { minimum: 8, maximum: 12 },
-      reviewStatus: 'em-revisao',
-      source: {
-        name: 'ExerciseAPI',
-        recordId: 'leg_press',
-        url: 'https://exercise-api.com/v1/exercises/leg_press',
-        license: 'CC BY 4.0',
-      },
     },
   }),
   makeExercise('cadeira-extensora', 'Cadeira extensora', ['extensora'], 'Pernas', 'Máquina', ['Ajuste o eixo à altura do joelho.', 'Estenda de forma controlada.', 'Retorne sem soltar o peso.']),
@@ -90,20 +64,6 @@ export const exercises: Exercise[] = [
       posterSrc: exerciseMediaUrl('stiff/poster.webp'),
       motionSrc: exerciseMediaUrl('stiff/movimento.webp'),
       alt: 'A personagem demonstra o levantamento terra romeno, alternando entre a posição em pé e a inclinação do tronco com a barra próxima às pernas.',
-    },
-    curation: {
-      primaryMuscles: ['Posteriores de coxa'],
-      secondaryMuscles: ['Glúteos', 'Eretores da coluna'],
-      movementPattern: 'Dobradiça de quadril',
-      stimulusToFatigue: 'moderado',
-      suggestedRepRange: { minimum: 6, maximum: 10 },
-      reviewStatus: 'em-revisao',
-      source: {
-        name: 'ExerciseAPI',
-        recordId: 'romanian_deadlift',
-        url: 'https://exercise-api.com/v1/exercises/romanian_deadlift',
-        license: 'CC BY 4.0',
-      },
     },
   }),
   makeExercise('elevacao-pelvica', 'Elevação pélvica', ['hip thrust', 'ponte'], 'Glúteos', 'Barra', ['Apoie as escápulas no banco.', 'Eleve o quadril mantendo o abdômen firme.', 'Pause no topo sem hiperestender a lombar.']),
@@ -139,4 +99,5 @@ export const exercises: Exercise[] = [
   makeExercise('mobilidade', 'Mobilidade', ['alongamento', 'mobilidade articular'], 'Outras', 'Livre', ['Escolha as regiões trabalhadas.', 'Registre o tempo total.', 'Anote movimentos importantes se quiser.'], { category: 'other', metricMode: 'time-only', visual: 'flow' }),
 ]
 
+export const exercises = [...originalExercises, ...catalogAdditions].map(applyCatalogReview)
 export const exerciseGroups = ['Todos', ...Array.from(new Set(exercises.map((item) => item.group)))]

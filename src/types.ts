@@ -8,6 +8,28 @@ export type ExerciseVisual = 'squat' | 'press' | 'hinge' | 'bridge' | 'lunge' | 
 export type AvatarPresetId = 'flex' | 'bottle' | 'lift' | 'run'
 export type ProfileAvatar = { type: 'preset'; presetId: AvatarPresetId } | { type: 'custom'; dataUrl: string }
 
+export type ExperienceLevel = 'Iniciante' | 'Intermediário' | 'Avançado'
+export type TrainingFocus = 'Corpo inteiro' | 'Inferiores' | 'Superiores' | 'Core' | 'Cardio' | 'Prática livre'
+export type MuscleRegionId = 'chest' | 'shoulders' | 'biceps' | 'triceps' | 'forearms' | 'abs' | 'obliques' | 'upperBack' | 'lats' | 'lowerBack' | 'glutes' | 'hips' | 'quads' | 'adductors' | 'hamstrings' | 'calves'
+export type LoadConvention = 'total' | 'per-implement' | 'machine' | 'assistance' | 'none'
+export interface ExerciseAnalysis {
+  version: string
+  kind: 'movement' | 'session'
+  familiarity: ExperienceLevel
+  focus: TrainingFocus
+  primaryRegions: MuscleRegionId[]
+  secondaryRegions: MuscleRegionId[]
+  loadConvention: LoadConvention
+  repetitions: 'bilateral' | 'per-side' | 'alternating' | 'time'
+}
+export interface ExerciseEditorial {
+  reviewedAt: string
+  setup: string
+  care: string
+  recordingHint: string
+  references: { name: string; url: string }[]
+}
+
 export interface ExerciseMedia {
   posterSrc: string
   motionSrc: string
@@ -42,6 +64,8 @@ export interface Exercise {
   visual: ExerciseVisual
   media?: ExerciseMedia
   curation?: ExerciseCuration
+  analysis?: ExerciseAnalysis
+  editorial?: ExerciseEditorial
 }
 
 export interface WorkoutSet {
@@ -53,6 +77,8 @@ export interface WorkoutSet {
   completed: boolean
   completedAt?: string
   metrics?: WorkoutMetric[]
+  /** Capturada ao concluir. Ausente significa unidade desconhecida no registro legado. */
+  loadUnit?: LoadUnit
 }
 
 export interface WorkoutRest {
@@ -79,6 +105,8 @@ export interface WorkoutItem {
   metrics?: WorkoutMetric[]
   sets: WorkoutSet[]
   note?: string
+  /** Classificação no momento da inclusão: novas curadorias não reescrevem o histórico. */
+  analysis?: ExerciseAnalysis
 }
 
 export interface Workout {
@@ -100,6 +128,7 @@ export interface Workout {
   rests?: WorkoutRest[]
   currentItemId?: string
   loadUnit?: LoadUnit
+  timeZone?: string
 }
 
 export interface WorkoutTemplate {
@@ -108,6 +137,10 @@ export interface WorkoutTemplate {
   note: string
   exerciseIds: string[]
   origin: 'system' | 'custom'
+  level?: ExperienceLevel
+  focus?: TrainingFocus
+  intention?: string
+  preparation?: string
 }
 
 export type TimelineKind = 'workout' | 'note' | 'photo'

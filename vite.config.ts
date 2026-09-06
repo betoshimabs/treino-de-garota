@@ -92,10 +92,10 @@ export default defineConfig({
             urlPattern: /\/exercise-media\/.*\.webp$/,
             handler: 'CacheFirst',
             options: {
-              cacheName: 'brabita-exercise-media-v1',
+              cacheName: 'brabita-exercise-media-v2',
               cacheableResponse: { statuses: [0, 200] },
               expiration: {
-                maxEntries: 74,
+                maxEntries: 100,
                 maxAgeSeconds: 60 * 60 * 24 * 30,
               },
             },

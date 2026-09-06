@@ -5,6 +5,7 @@ import {
   BookOpen,
   Camera,
   Check,
+  ChevronDown,
   ChevronLeft,
   ChevronRight,
   Clock3,
@@ -35,17 +36,21 @@ import { HashRouter, NavLink, Route, Routes, useLocation, useNavigate, useParams
 import { CURRENT_RELEASE, getInitialUpdateFlow, type AppRelease, type UpdateFlow } from './app-version'
 import { db, clearAllData, defaultProfile, loadSnapshot, saveProfile, mutateActiveWorkout } from './db'
 import { WorkoutGuide } from './components/WorkoutGuide'
-import { recordGuidedSet, settleRests } from './workout-guide'
+import { completedItemSummary, itemFinished, recordGuidedSet, restTotal, settleRests } from './workout-guide'
+import { MuscleMap } from './components/MuscleMap'
+import { Evolution } from './components/Evolution'
+import { TemplateLibrary } from './components/TemplateLibrary'
+import { recordingHint } from './data/catalog-review'
 import { exerciseGroups, exercises as systemExercises } from './data/exercises'
 import { systemTemplates } from './data/templates'
 import { avatarCropRect, avatarPresets, constrainAvatarCrop, profileAvatarSource, type AvatarCrop, type AvatarImageSize } from './avatar'
-import { calculateBmi, defaultMetricsForMode, formatLocalizedNumber, isSetValidForMetrics, kgToLb, lbToKg, parseLocalizedNumber, workoutItemReadiness, workoutMetricOrder } from './domain'
+import { calculateBmi, defaultMetricsForMode, formatLocalizedNumber, isSetValidForMetrics, kgToLb, lbToKg, parseLocalizedNumber, workoutMetricOrder } from './domain'
 import { ExerciseArtwork } from './components/ExerciseVisual'
 import { BrandLoading, BrandMotion, useOpeningReady } from './components/BrandLoading'
 import { applyAppUpdate } from './pwa-update'
 import { canShowInstallNudge, consumeCapturedInstallPrompt, getInstallPlatform, getManualInstallSteps, INSTALL_SNOOZE_DURATION_MS, INSTALL_SNOOZE_KEY, subscribeToInstallPrompt, type BeforeInstallPromptEvent, type InstallPlatform } from './pwa-install'
 import { getAuthErrorMessage, useAuth } from './auth'
-import { exerciseProgress, thisMonthCount, totalCompletedSets, workoutDurationMinutes } from './stats'
+import { thisMonthCount, totalCompletedSets, workoutDurationMinutes } from './stats'
 import { MAX_TIMELINE_PHOTOS, timelineImages, timelineMedia } from './timeline'
 import { getWeekdayInvitation } from './home-copy'
 import { createWorkoutTitleSuggestion, isAutomaticWorkoutTitle, workoutTitleTextAlternative } from './workout-title'
@@ -335,11 +340,13 @@ function TodayPage({ data, refresh, allExercises, allTemplates }: SharedProps) {
       sourceTemplateId: template?.id ?? repeat?.sourceTemplateId,
       restSeconds: repeat?.restSeconds ?? 90,
       loadUnit: data.profile.loadUnit,
+      timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone,
       items: repeat?.items.map((item) => ({
         id: makeId(), exerciseId: item.exerciseId, exerciseName: item.exerciseName, category: item.category, metricMode: item.metricMode,
         metrics: item.metrics ?? defaultMetricsForMode(item.metricMode),
+        analysis: allExercises.find(exercise => exercise.id === item.exerciseId)?.analysis,
         sets: [{ id: makeId(), completed: false }],
-      })) ?? templateItems?.map((exercise) => ({ id: makeId(), exerciseId: exercise.id, exerciseName: exercise.name, category: exercise.category, metricMode: exercise.metricMode, metrics: defaultMetricsForMode(exercise.metricMode), sets: [{ id: makeId(), completed: false }] })) ?? [],
+      })) ?? templateItems?.map((exercise) => ({ id: makeId(), exerciseId: exercise.id, exerciseName: exercise.name, category: exercise.category, metricMode: exercise.metricMode, analysis: exercise.analysis, metrics: defaultMetricsForMode(exercise.metricMode), sets: [{ id: makeId(), completed: false }] })) ?? [],
     }
     await db.workouts.put(workout)
     await refresh()
@@ -398,6 +405,7 @@ function WorkoutPage({ data, refresh, setNotice, allExercises, allTemplates }: S
   const [feeling, setFeeling] = useState<Feeling | undefined>(active?.feeling)
   const [section, setSection] = useState<'strength' | 'activities'>('strength')
   const [finishConfirm, setFinishConfirm] = useState(false)
+  const [pendingFinish, setPendingFinish] = useState<WorkoutItem[]>([])
   const [abandonConfirm, setAbandonConfirm] = useState(false)
   const [actionBusy, setActionBusy] = useState(false)
   const [currentItemId, setCurrentItemId] = useState<string>()
@@ -457,11 +465,11 @@ function WorkoutPage({ data, refresh, setNotice, allExercises, allTemplates }: S
     const workout = suggestion
       ? { ...next, title: suggestion.title, titleTextAlternative: suggestion.accessibleTitle, titleMode: 'auto' as const }
       : next
-    await mutateActiveWorkout(workout.id, latest => ({ ...workout, rests: latest.rests, currentItemId: latest.currentItemId, loadUnit: latest.loadUnit ?? workoutUnit }))
+    await mutateActiveWorkout(workout.id, latest => ({ ...workout, rests: latest.rests, currentItemId: latest.currentItemId, loadUnit: latest.loadUnit }))
     await refresh()
   }
   const updateItem = async (itemId: string, fn: (item: WorkoutItem) => WorkoutItem) => {
-    await mutateActiveWorkout(active.id, latest => ({ ...latest, loadUnit: latest.loadUnit ?? workoutUnit, items: latest.items.map((item) => item.id === itemId ? fn(item) : item) }))
+    await mutateActiveWorkout(active.id, latest => ({ ...latest, items: latest.items.map((item) => item.id === itemId ? fn(item) : item) }))
     await refresh()
   }
   const openPicker = () => { setPickerMode('exercise'); setQuery(''); setPickerOpen(true) }
@@ -469,6 +477,7 @@ function WorkoutPage({ data, refresh, setNotice, allExercises, allTemplates }: S
   const toWorkoutItem = (exercise: Exercise): WorkoutItem => ({
     id: makeId(), exerciseId: exercise.id, exerciseName: exercise.name, category: exercise.category, metricMode: exercise.metricMode,
     metrics: defaultMetricsForMode(exercise.metricMode),
+    analysis: exercise.analysis,
     sets: [{ id: makeId(), completed: false }],
   })
   const addExercise = async (exercise: Exercise) => {
@@ -523,20 +532,23 @@ function WorkoutPage({ data, refresh, setNotice, allExercises, allTemplates }: S
         if (entry.completed !== set.completed) return latest
         const metrics = item.metrics ?? defaultMetricsForMode(item.metricMode)
         if (!entry.completed && !isSetValidForMetrics(entry, metrics)) throw new Error('Preencha as medidas escolhidas acima de zero.')
-        if (!entry.completed) return { ...recordGuidedSet(latest, itemId, entry, metrics, new Date().toISOString()), loadUnit: latest.loadUnit ?? workoutUnit }
-        return { ...latest, loadUnit: latest.loadUnit ?? workoutUnit, items: latest.items.map(row => row.id !== itemId ? row : { ...row, sets: row.sets.map(value => value.id !== set.id ? value : { ...value, completed: !value.completed, completedAt: value.completed ? undefined : new Date().toISOString(), metrics: [...metrics] }) }) }
+        if (!entry.completed) return recordGuidedSet(latest, itemId, entry, metrics, new Date().toISOString(), workoutUnit)
+        return { ...latest, items: latest.items.map(row => row.id !== itemId ? row : { ...row, sets: row.sets.map(value => value.id !== set.id ? value : { ...value, completed: !value.completed, completedAt: value.completed ? undefined : new Date().toISOString(), metrics: [...metrics] }) }) }
       })
       await refresh()
     } catch (error) { setNotice(error instanceof Error ? error.message : 'Não conseguimos guardar o registro.') }
   }
-  const askToFinish = async () => {
+  const askToFinish = async (allowPending = false) => {
     const latest = await db.workouts.get(active.id) ?? active
+    const pending = latest.items.filter(item => !itemFinished(item))
+    if (pending.length && !allowPending) { setPendingFinish(pending); return }
     if (!latest.items.some((item) => item.sets.some((set) => set.completed))) {
       setNotice('Conclua ao menos uma série ou registro antes de finalizar.')
       return
     }
     setTitleDraft(resolvedTitle.title)
     setTitleEditing(false)
+    setPendingFinish([])
     setFinishConfirm(true)
   }
   const finish = async () => {
@@ -554,7 +566,7 @@ function WorkoutPage({ data, refresh, setNotice, allExercises, allTemplates }: S
         const suggestion = isAutomaticWorkoutTitle(latest) ? suggestTitle(latest, feeling) : undefined
         const title = editedTitle || suggestion?.title || latest.title
         const titleTextAlternative = editedTitle ? workoutTitleTextAlternative(editedTitle) : suggestion?.accessibleTitle ?? latest.titleTextAlternative ?? title
-        const completedWorkout: Workout = { ...latest, title, titleTextAlternative, titleMode: editedTitle ? 'custom' : latest.titleMode, status: 'completed', endedAt, feeling, loadUnit: latest.loadUnit ?? workoutUnit }
+        const completedWorkout: Workout = { ...latest, title, titleTextAlternative, titleMode: editedTitle ? 'custom' : latest.titleMode, status: 'completed', endedAt, feeling }
         const exerciseCount = latest.items.filter(item => item.sets.some(set => set.completed)).length
         const setCount = latest.items.reduce((sum, item) => sum + item.sets.filter(set => set.completed).length, 0)
         const restSeconds = (latest.rests ?? []).reduce((sum, rest) => sum + (rest.actualSeconds ?? 0), 0)
@@ -655,14 +667,6 @@ function WorkoutPage({ data, refresh, setNotice, allExercises, allTemplates }: S
           <p>{section === 'strength' ? 'Toque no + para começar a registrar.' : 'Tempo e distância ficam separados da musculação.'}</p>
         </div>
       ) : <>
-        <nav className="workout-stepper" aria-label={active.sourceTemplateId ? 'Sequência do modelo' : 'Sequência do treino'}>
-          <p>{active.sourceTemplateId ? 'Sequência do modelo' : 'Sequência do treino'}</p>
-          <div>{active.items.map((item) => {
-            const itemIndex = active.items.findIndex((candidate) => candidate.id === item.id)
-            const complete = workoutItemReadiness(item) === 'complete'
-            return <button type="button" key={item.id} className={item.id === currentItem.id ? 'current' : ''} aria-current={item.id === currentItem.id ? 'step' : undefined} onClick={() => focusWorkoutItem(item)}><span>{complete ? <Check size={14} /> : itemIndex + 1}</span><small>{item.exerciseName}</small></button>
-          })}</div>
-        </nav>
         <section id={`workout-item-${currentItem.id}`} className="exercise-block current" aria-labelledby={`exercise-${currentItem.id}`}>
             <div className="exercise-block-title"><span>{String(currentItemIndex + 1).padStart(2, '0')}</span><h2 id={`exercise-${currentItem.id}`}>{currentItem.exerciseName}</h2><button className="icon-button small" aria-label={`Remover ${currentItem.exerciseName}`} onClick={() => void persist({ ...active, items: active.items.filter((row) => row.id !== currentItem.id) })}><X /></button></div>
             <MetricSelector item={currentItem} unit={workoutUnit} onToggle={(metric) => void toggleMetric(currentItem.id, metric)} />
@@ -685,12 +689,13 @@ function WorkoutPage({ data, refresh, setNotice, allExercises, allTemplates }: S
 
       {pickerOpen && <div className="sheet-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) closePicker() }}><section className="bottom-sheet exercise-picker-sheet" role="dialog" aria-modal="true" aria-labelledby="picker-title"><div className="sheet-handle" /><header><h2 id="picker-title">Adicionar ao treino</h2><button className="icon-button" aria-label="Fechar" onClick={closePicker}><X /></button></header><div className="picker-tabs" role="tablist" aria-label="O que adicionar"><button role="tab" aria-selected={pickerMode === 'exercise'} className={pickerMode === 'exercise' ? 'selected' : ''} onClick={() => { setPickerMode('exercise'); setQuery('') }}>Exercício</button><button role="tab" aria-selected={pickerMode === 'template'} className={pickerMode === 'template' ? 'selected' : ''} onClick={() => { setPickerMode('template'); setQuery('') }}>Modelo</button></div><label className="search-field"><Search size={19} /><input placeholder={pickerMode === 'exercise' ? (section === 'strength' ? 'Buscar exercício' : 'Buscar cardio ou atividade') : 'Buscar modelo'} value={query} onChange={(event) => setQuery(event.target.value)} /></label>{pickerMode === 'exercise' ? <div className="picker-list" tabIndex={-1}>{filtered.map((exercise) => <button key={exercise.id} onClick={() => void addExercise(exercise)}><ExerciseArtwork exercise={exercise} compact /><span><strong>{exercise.name}</strong><small>{exercise.group} · {exercise.equipment}</small></span><Plus size={19} /></button>)}</div> : <div className="picker-list picker-template-list" tabIndex={-1}>{filteredTemplates.map((template) => <button key={template.id} onClick={() => void addTemplate(template)}><span className="template-picker-mark" /><span><strong>{template.name}</strong><small>{template.note}</small><em>{template.exerciseIds.slice(0, 3).map((id) => allExercises.find((exercise) => exercise.id === id)?.name).filter(Boolean).join(' · ')}</em></span><Plus size={19} /></button>)}</div>}</section></div>}
 
-      <ConfirmDialog open={finishConfirm} title="Guardar este treino?" confirmLabel="Guardar treino" onClose={() => setFinishConfirm(false)} onConfirm={() => void finish()} busy={actionBusy}>
+      <ConfirmDialog open={pendingFinish.length > 0} title="Ficou exercício pendente" heading="Antes de guardar" cancelLabel="Ir para exercício" onCancel={() => { const pending = active.items.find(item => item.id === pendingFinish[0]?.id); setPendingFinish([]); if (pending) focusWorkoutItem(pending) }} confirmLabel="Finalizar mesmo assim" onClose={() => setPendingFinish([])} onConfirm={() => { setPendingFinish([]); void askToFinish(true) }}>
+        <p>{pendingFinish.length === 1 ? <><strong>{pendingFinish[0]?.exerciseName}</strong> ainda não foi concluído.</> : <>Ainda há exercícios não concluídos:</>}</p>
+        {pendingFinish.length > 1 && <ul>{pendingFinish.map(item => <li key={item.id}>{item.exerciseName}</li>)}</ul>}
+      </ConfirmDialog>
+      <ConfirmDialog open={finishConfirm} title="Guardar este treino?" heading="Para sua linha" confirmLabel="Guardar treino" onClose={() => setFinishConfirm(false)} onConfirm={() => void finish()} busy={actionBusy}>
         <p>Como foi a intensidade?</p>
         <div className="feeling-row" role="group" aria-label="Intensidade do treino">{(['leve', 'normal', 'intenso'] as Feeling[]).map(value => <button disabled={actionBusy} aria-pressed={feeling === value} className={feeling === value ? 'selected' : ''} key={value} onClick={() => void chooseFeeling(value)}>{sentenceCase(value)}</button>)}</div>
-        {!feeling && <p>Escolha Leve, Normal ou Intenso antes de guardar.</p>}
-        {active.items.some(item => item.sets.some(set => !set.completed)) && <p>Há registros não concluídos. Eles ficam como rascunhos no histórico, sem contar nas estatísticas.</p>}
-        <p>Confira o que vai entrar na sua linha.</p>
         <div className="workout-confirm-title">
           {titleEditing
             ? <label><span className="sr-only">Título do treino</span><input autoFocus maxLength={80} value={titleDraft} onChange={(event) => setTitleDraft(event.target.value)} /></label>
@@ -698,7 +703,8 @@ function WorkoutPage({ data, refresh, setNotice, allExercises, allTemplates }: S
           <button type="button" aria-label={titleEditing ? 'Salvar título' : 'Editar título'} onClick={() => titleEditing ? void saveTitle() : (setTitleDraft(resolvedTitle.title), setTitleEditing(true))}>{titleEditing ? <Check size={18} /> : <PencilLine size={18} />}</button>
         </div>
         {!isAutomaticWorkoutTitle(active) && <button className="restore-title-suggestion" type="button" onClick={() => void restoreSuggestedTitle()}><RotateCcw size={15} /> Usar sugestão</button>}
-        <div className="workout-confirm-summary"><strong>{elapsed < 1 ? 'Menos de 1 min' : `${elapsed} min`}</strong><span>{completedItemCount} {completedItemCount === 1 ? 'atividade' : 'atividades'}</span><span>{completedSetCount} {completedSetCount === 1 ? 'registro concluído' : 'registros concluídos'}</span>{feeling && <span>Sensação: {feeling}</span>}</div>
+        <div className="workout-save-overview"><div><strong>{elapsed < 1 ? 'Menos de 1 min' : `${elapsed} min`}</strong><small>{Math.floor(restTotal(active) / 60)} min {restTotal(active) % 60} s de descanso incluídos</small></div><p>{completedItemCount} {completedItemCount === 1 ? 'exercício' : 'exercícios'} · {active.items.filter(item => item.category === 'strength').reduce((sum, item) => sum + item.sets.filter(set => set.completed).length, 0)} séries{activityCount > 0 && <> · {active.items.filter(item => item.category !== 'strength').reduce((sum, item) => sum + item.sets.filter(set => set.completed).length, 0)} registros de cardio/outras</>}</p></div>
+        <details className="workout-save-details"><summary><span className="details-closed-label">Ver detalhes</span><span className="details-open-label">Ocultar detalhes</span><span className="details-chevron" aria-hidden="true" /></summary><ul className="workout-save-items">{active.items.filter(item => item.sets.some(set => set.completed)).map(item => <li key={item.id}><strong>{item.exerciseName}</strong><small>{completedItemSummary(item, workoutUnit)}</small></li>)}</ul></details>
       </ConfirmDialog>
       <ConfirmDialog open={abandonConfirm} title="Apagar este treino?" confirmLabel="Apagar treino" tone="danger" onClose={() => setAbandonConfirm(false)} onConfirm={() => void abandon()} busy={actionBusy}>
         <p>As séries e atividades deste treino em andamento serão removidas deste aparelho.</p>
@@ -717,10 +723,10 @@ function metricLabel(metric: WorkoutMetric, unit: Profile['loadUnit'], compact =
 
 function MetricSelector({ item, unit, onToggle }: { item: WorkoutItem; unit: Profile['loadUnit']; onToggle: (metric: WorkoutMetric) => void }) {
   const metrics = item.metrics ?? defaultMetricsForMode(item.metricMode)
-  return <details className="metric-selector"><summary><SlidersHorizontal size={15} /><span>O que registrar</span><small>{metrics.map((metric) => sentenceCase(metricLabel(metric, unit, true))).join(' · ')}</small></summary><div className="metric-options" role="group" aria-label={`Métricas de ${item.exerciseName}`}>{workoutMetricOrder.map((metric) => {
+  return <><details className="metric-selector"><summary><SlidersHorizontal size={15} /><span>O que registrar</span><small>{metrics.map((metric) => sentenceCase(metricLabel(metric, unit, true))).join(' · ')}</small></summary><div className="metric-options" role="group" aria-label={`Métricas de ${item.exerciseName}`}>{workoutMetricOrder.map((metric) => {
     const selected = metrics.includes(metric)
     return <button type="button" key={metric} className={selected ? 'selected' : ''} aria-pressed={selected} onClick={() => onToggle(metric)}>{selected ? <Check size={15} /> : <Plus size={15} />}{sentenceCase(metricLabel(metric, unit, true))}</button>
-  })}</div></details>
+  })}</div></details>{item.analysis && <p className="recording-hint">{recordingHint(item.analysis)}</p>}</>
 }
 
 function MetricLabels({ metrics, unit }: { metrics: WorkoutMetric[]; unit: Profile['loadUnit'] }) {
@@ -730,12 +736,12 @@ function MetricLabels({ metrics, unit }: { metrics: WorkoutMetric[]; unit: Profi
 function MetricFields({ metrics, unit, set, index, onCommit }: { metrics: WorkoutMetric[]; unit: Profile['loadUnit']; set: WorkoutSet; index: number; onCommit: (patch: Partial<WorkoutSet>) => void }) {
   type SetMetricKey = 'load' | 'reps' | 'distanceKm' | 'durationMinutes'
   const fields: Array<{ key: SetMetricKey; value?: number; label: string }> = metrics.map((metric) => {
-    if (metric === 'load') return { key: 'load', value: set.load, label: `Carga do registro ${index + 1} em ${unit}` }
+    if (metric === 'load') return { key: 'load', value: set.load, label: `Carga do registro ${index + 1} em ${set.loadUnit ?? unit}` }
     if (metric === 'reps') return { key: 'reps', value: set.reps, label: `Repetições do registro ${index + 1}` }
     if (metric === 'distance') return { key: 'distanceKm', value: set.distanceKm, label: `Distância do registro ${index + 1} em quilômetros` }
     return { key: 'durationMinutes', value: set.durationMinutes, label: `Tempo do registro ${index + 1} em minutos` }
   })
-  return <span className={`metric-inputs metrics-${fields.length}`}>{fields.map((field) => <LocalizedNumberInput key={field.key} value={field.value} label={field.label} onCommit={(value) => onCommit({ [field.key]: value })} />)}</span>
+  return <span className={`metric-inputs metrics-${fields.length}`}>{fields.map((field) => <LocalizedNumberInput key={field.key} value={field.value} label={field.label} onCommit={(value) => onCommit({ [field.key]: value, ...(field.key === 'load' ? { loadUnit: set.loadUnit ?? unit } : {}) })} />)}</span>
 }
 
 function ExerciseNoteInput({ itemId, exerciseName, value, onCommit }: { itemId: string; exerciseName: string; value?: string; onCommit: (value: string) => void }) {
@@ -976,7 +982,7 @@ function TimelineMediaViewer({ items, entries, activeId, onClose }: { items: Ret
   </section></div>
 }
 
-function TimelineDetailDialog({ entry, workout, loadUnit, onClose }: { entry?: TimelineEntry; workout?: Workout; loadUnit: Profile['loadUnit']; onClose: () => void }) {
+function TimelineDetailDialog({ entry, workout, onClose }: { entry?: TimelineEntry; workout?: Workout; loadUnit: Profile['loadUnit']; onClose: () => void }) {
   const titleId = useId()
   const closeButton = useRef<HTMLButtonElement>(null)
   useEffect(() => {
@@ -1007,7 +1013,7 @@ function TimelineDetailDialog({ entry, workout, loadUnit, onClose }: { entry?: T
   if (!entry) return null
   const images = timelineImages(entry)
   const kindLabel = entry.kind === 'workout' ? 'Treino' : images.length > 0 ? `${images.length} ${images.length === 1 ? 'foto' : 'fotos'}` : 'Nota'
-  return <div className="detail-dialog-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose() }}><section className="timeline-detail-dialog" role="dialog" aria-modal="true" aria-labelledby={titleId}><header><div><p className="eyebrow">{kindLabel} · {formatLongDate(entry.occurredAt)} · {formatTime(entry.occurredAt)}</p><h2 id={titleId} aria-label={entry.titleTextAlternative ?? workoutTitleTextAlternative(entry.title)}>{entry.title}</h2></div><button ref={closeButton} className="icon-button" aria-label="Fechar detalhes" onClick={onClose}><X /></button></header>{entry.isMilestone && <p className="milestone-label"><Star size={14} fill="currentColor" /> Meu marco</p>}{entry.text && <p className="timeline-detail-text">{entry.text}</p>}{images.length > 0 && <TimelineRecordMedia key={entry.id} images={images} text={entry.text} />}{workout && <div className="timeline-workout-detail"><p className="timeline-workout-summary">{workoutDurationMinutes(workout)} min · {workout.items.length} {workout.items.length === 1 ? 'atividade' : 'atividades'}{workout.feeling ? ` · ${workout.feeling}` : ''}</p><WorkoutRestHistory workout={workout} />{workout.items.map((item) => <section key={item.id}><h3>{item.exerciseName}</h3><p>{item.sets.filter((set) => set.completed).map((set) => formatSetSummary(set, item.metrics ?? defaultMetricsForMode(item.metricMode), workout.loadUnit ?? loadUnit)).join(' · ') || 'Sem registros concluídos'}</p>{item.note && <small>{item.note}</small>}</section>)}</div>}</section></div>
+  return <div className="detail-dialog-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose() }}><section className="timeline-detail-dialog" role="dialog" aria-modal="true" aria-labelledby={titleId}><header><div><p className="eyebrow">{kindLabel} · {formatLongDate(entry.occurredAt)} · {formatTime(entry.occurredAt)}</p><h2 id={titleId} aria-label={entry.titleTextAlternative ?? workoutTitleTextAlternative(entry.title)}>{entry.title}</h2></div><button ref={closeButton} className="icon-button" aria-label="Fechar detalhes" onClick={onClose}><X /></button></header>{entry.isMilestone && <p className="milestone-label"><Star size={14} fill="currentColor" /> Meu marco</p>}{entry.text && <p className="timeline-detail-text">{entry.text}</p>}{images.length > 0 && <TimelineRecordMedia key={entry.id} images={images} text={entry.text} />}{workout && <div className="timeline-workout-detail"><p className="timeline-workout-summary">{workoutDurationMinutes(workout)} min · {workout.items.length} {workout.items.length === 1 ? 'atividade' : 'atividades'}{workout.feeling ? ` · ${workout.feeling}` : ''}</p><WorkoutRestHistory workout={workout} />{workout.items.map((item) => <section key={item.id}><h3>{item.exerciseName}</h3><p>{item.sets.filter((set) => set.completed).map((set) => formatSetSummary(set, item.metrics ?? defaultMetricsForMode(item.metricMode), workout.loadUnit)).join(' · ') || 'Sem registros concluídos'}</p>{item.note && <small>{item.note}</small>}</section>)}</div>}</section></div>
 }
 
 function ExercisesPage({ data, refresh, setNotice, allExercises, allTemplates }: SharedProps) {
@@ -1037,7 +1043,7 @@ function ExercisesPage({ data, refresh, setNotice, allExercises, allTemplates }:
         <div className="filter-row scrollable">{exerciseGroups.map((value) => <button key={value} className={group === value ? 'selected' : ''} onClick={() => setGroup(value)}>{value}</button>)}</div>
         <p className="result-count">{filtered.length} {filtered.length === 1 ? 'exercício' : 'exercícios'}</p>
         <div className="exercise-list">{filtered.map((exercise) => <div className="exercise-list-row" key={exercise.id}><NavLink to={`/exercicios/${exercise.id}`}><ExerciseArtwork exercise={exercise} compact /><span><strong>{exercise.name}</strong><small>{exercise.group} · {exercise.equipment}{exercise.origin === 'custom' ? ' · pessoal' : ''}</small></span></NavLink><button className="icon-button small" aria-label={data.favorites.includes(exercise.id) ? `Desfavoritar ${exercise.name}` : `Favoritar ${exercise.name}`} onClick={() => void toggleFavorite(exercise.id)}><Heart size={19} fill={data.favorites.includes(exercise.id) ? 'currentColor' : 'none'} /></button></div>)}</div>
-      </> : <div className="template-library"><p className="library-note">Modelos apenas preparam o treino. Você pode trocar ou remover qualquer exercício.</p>{allTemplates.map((template) => <article className="template-row" key={template.id}><span className="template-thread" /><div><p>{template.origin === 'custom' ? 'Modelo pessoal' : 'Modelo do app'}</p><h2>{template.name}</h2><small>{template.note}</small><div className="template-exercises">{template.exerciseIds.slice(0, 4).map((id) => <span key={id}>{allExercises.find((exercise) => exercise.id === id)?.name ?? 'Exercício removido'}</span>)}{template.exerciseIds.length > 4 && <span>+{template.exerciseIds.length - 4}</span>}</div></div></article>)}</div>}
+      </> : <TemplateLibrary templates={allTemplates} exercises={allExercises} data={data} refresh={refresh} />}
       <FloatingAddButton tone="blue" label={librarySection === 'exercises' ? 'Criar exercício pessoal' : 'Criar modelo de treino'} onClick={() => librarySection === 'exercises' ? setCreating(true) : setCreatingTemplate(true)} />
       {creating && <CustomExerciseSheet onClose={() => setCreating(false)} onSaved={async () => { await refresh(); setCreating(false); setNotice('Exercício pessoal criado.') }} />}
       {creatingTemplate && <TemplateSheet exercises={allExercises} onClose={() => setCreatingTemplate(false)} onSaved={async () => { await refresh(); setCreatingTemplate(false); setNotice('Modelo pessoal criado.') }} />}
@@ -1100,7 +1106,7 @@ function ExerciseDetail({ allExercises, data, refresh }: { allExercises: Exercis
       <h1>{exercise.name}</h1>
       <div className={`detail-illustration${exercise.media ? ' has-media' : ''}`}>
         <ExerciseArtwork exercise={exercise} />
-        <small>{exercise.media ? 'Início e execução' : 'Movimento resumido'}</small>
+        <small>{exercise.analysis?.kind === 'session' ? 'Cena representativa da atividade' : exercise.media ? 'Início e execução' : 'Ilustração demonstrativa em preparação'}</small>
       </div>
       {exercise.curation && (
         <section className="exercise-facts" aria-labelledby="exercise-facts-title">
@@ -1109,32 +1115,27 @@ function ExerciseDetail({ allExercises, data, refresh }: { allExercises: Exercis
             {exercise.curation.reviewStatus === 'em-revisao' && <small>Conteúdo em revisão</small>}
           </div>
           <dl>
-            <div><dt>Alvo principal</dt><dd>{exercise.curation.primaryMuscles.join(', ')}</dd></div>
-            <div><dt>Também trabalha</dt><dd>{exercise.curation.secondaryMuscles.join(', ')}</dd></div>
             <div><dt>Padrão</dt><dd>{exercise.curation.movementPattern}</dd></div>
-            {exercise.curation.suggestedRepRange && <div><dt>Faixa de referência</dt><dd>{exercise.curation.suggestedRepRange.minimum}–{exercise.curation.suggestedRepRange.maximum} repetições</dd></div>}
-            {exercise.curation.stimulusToFatigue && <div><dt>Estímulo × fadiga</dt><dd>{sentenceCase(exercise.curation.stimulusToFatigue)}</dd></div>}
+            {exercise.analysis && <div><dt>Familiaridade sugerida</dt><dd>{exercise.analysis.familiarity}</dd></div>}
+            {exercise.analysis && <div><dt>Foco</dt><dd>{exercise.analysis.focus}</dd></div>}
           </dl>
         </section>
       )}
+      {exercise.curation && exercise.analysis?.kind !== 'session' && <MuscleMap key={exercise.id} curation={exercise.curation} />}
+      {exercise.editorial && <section className="exercise-editorial"><h2>Antes de começar</h2><p>{exercise.editorial.setup}</p><p>{exercise.editorial.care}</p><h3>Como registrar</h3><p>{exercise.editorial.recordingHint}</p><small>Familiaridade é uma classificação editorial da execução, não uma avaliação da sua capacidade.</small></section>}
       <section>
         <p className="eyebrow">Um passo de cada vez</p>
         <ol className="instruction-list">{exercise.instructions.map((instruction, index) => <li key={instruction}><span>{index + 1}</span><p>{instruction}</p></li>)}</ol>
       </section>
       <aside className="care-note"><Info size={18} /><p>A demonstração ajuda a reconhecer o movimento, mas não mostra todos os ajustes. Use como referência geral; ela não substitui orientação profissional.</p></aside>
       {exercise.curation && <p className="exercise-attribution">Dados adaptados de <a href={exercise.curation.source.url} target="_blank" rel="noreferrer">{exercise.curation.source.name}</a> · {exercise.curation.source.license}</p>}
+      {exercise.editorial && <details className="evolution-details"><summary>Referências e revisão <ChevronDown size={17} /></summary><p className="muted">Revisão editorial em 06/09/2026. Validação profissional ainda pendente. Fontes complementares apoiam os ajustes, a técnica ou o contexto da atividade; não são uma prescrição pessoal.</p><ul>{exercise.editorial.references.map(reference => <li key={reference.url}><a href={reference.url} target="_blank" rel="noreferrer">{reference.name}</a></li>)}</ul></details>}
     </div>
   )
 }
 
 function EvolutionPage({ data, allExercises }: { data: AppSnapshot; allExercises: Exercise[] }) {
-  const completed = data.workouts.filter((workout) => workout.status === 'completed')
-  const usedExercises = Array.from(new Set(completed.flatMap((workout) => workout.items.map((item) => item.exerciseId))))
-  const [selected, setSelected] = useState(usedExercises[0] ?? '')
-  const points = exerciseProgress(data.workouts, selected, data.profile.loadUnit)
-  const maxValue = Math.max(...points.map((point) => point.value), 1)
-  const selectedName = allExercises.find((exercise) => exercise.id === selected)?.name
-  return <div className="page evolution-page"><PageHeader variant="evolution" eyebrow="Sem pressa" title="Evolução" /><section className="month-summary"><p>Neste mês</p><strong>{thisMonthCount(data.workouts)}</strong><span>Treinos que você guardou</span><i /></section><div className="stat-strip"><div><strong>{completed.length}</strong><span>Treinos no total</span></div><div><strong>{totalCompletedSets(data.workouts)}</strong><span>Registros concluídos</span></div></div><section className="progress-section"><div className="section-heading"><div><p className="eyebrow">Carga por sessão</p><h2>Um exercício</h2></div></div>{usedExercises.length === 0 ? <div className="empty-gentle"><BarChart3 size={22} /><p>Registre alguns treinos para enxergar mudanças por aqui.</p></div> : <><label className="field compact"><span>Exercício</span><select value={selected} onChange={(event) => setSelected(event.target.value)}>{usedExercises.map((id) => <option key={id} value={id}>{allExercises.find((exercise) => exercise.id === id)?.name ?? id}</option>)}</select></label>{points.length === 0 ? <p className="chart-summary">Ainda não há cargas concluídas para este exercício.</p> : <><div className="mini-chart" role="img" aria-label={`Evolução da carga em ${selectedName}: ${points.map((point) => `${point.value} ${data.profile.loadUnit} em ${formatDay(point.date)}`).join(', ')}`}><span className="chart-max">{maxValue} {data.profile.loadUnit}</span><div className="chart-bars">{points.slice(-8).map((point) => <div key={point.date} style={{ height: `${Math.max(12, point.value / maxValue * 100)}%` }}><span>{point.value}</span></div>)}</div></div><p className="chart-summary">Maior carga registrada em {selectedName}: <strong>{maxValue} {data.profile.loadUnit}</strong>.</p></>}</>}</section></div>
+  return <div className="page evolution-page"><PageHeader variant="evolution" eyebrow="Sua história, no seu ritmo" title="Evolução" /><Evolution data={data} exercises={allExercises} /></div>
 }
 
 function ProfilePage({ data, refresh, setNotice, installExperience }: SharedProps) {
@@ -1398,7 +1399,7 @@ function AppUpdateScreen({ flow, onRetry }: { flow: UpdateFlow; onRetry: () => v
 function WorkoutDetail({ data }: { data: AppSnapshot }) {
   const { id } = useParams(); const navigate = useNavigate(); const workout = data.workouts.find((item) => item.id === id)
   if (!workout) return <SimpleEmpty icon={<Dumbbell />} title="Treino não encontrado" />
-  return <div className="page detail-page"><header className="detail-top"><button className="icon-button" aria-label="Voltar" onClick={() => navigate(-1)}><ArrowLeft /></button></header><p className="eyebrow">{formatLongDate(workout.endedAt ?? workout.startedAt)}</p><h1 aria-label={workout.titleTextAlternative ?? workoutTitleTextAlternative(workout.title)}>{workout.title}</h1><p className="lead compact">{workoutDurationMinutes(workout)} min · {workout.items.length} atividades{workout.feeling ? ` · ${workout.feeling}` : ''}</p><div className="workout-detail-list"><WorkoutRestHistory workout={workout} />{workout.items.map((item) => <section key={item.id}><h2>{item.exerciseName}</h2><p>{item.sets.filter((set) => set.completed).map((set) => formatSetSummary(set, item.metrics ?? defaultMetricsForMode(item.metricMode), workout.loadUnit ?? data.profile.loadUnit)).join('  ·  ') || 'Sem registros concluídos'}</p>{item.note && <small>{item.note}</small>}</section>)}</div></div>
+  return <div className="page detail-page"><header className="detail-top"><button className="icon-button" aria-label="Voltar" onClick={() => navigate(-1)}><ArrowLeft /></button></header><p className="eyebrow">{formatLongDate(workout.endedAt ?? workout.startedAt)}</p><h1 aria-label={workout.titleTextAlternative ?? workoutTitleTextAlternative(workout.title)}>{workout.title}</h1><p className="lead compact">{workoutDurationMinutes(workout)} min · {workout.items.length} atividades{workout.feeling ? ` · ${workout.feeling}` : ''}</p><div className="workout-detail-list"><WorkoutRestHistory workout={workout} />{workout.items.map((item) => <section key={item.id}><h2>{item.exerciseName}</h2><p>{item.sets.filter((set) => set.completed).map((set) => formatSetSummary(set, item.metrics ?? defaultMetricsForMode(item.metricMode), workout.loadUnit)).join('  ·  ') || 'Sem registros concluídos'}</p>{item.note && <small>{item.note}</small>}</section>)}</div></div>
 }
 
 function WorkoutRestHistory({ workout }: { workout: Workout }) {
@@ -1423,7 +1424,7 @@ function FloatingAddButton({ tone, label, onClick }: { tone: 'pink' | 'blue'; la
   return <button className={`floating-add ${tone}`} aria-label={label} onClick={onClick}><Plus size={27} /></button>
 }
 
-function ConfirmDialog({ open, title, confirmLabel, tone = 'default', busy = false, onClose, onConfirm, children }: { open: boolean; title: string; confirmLabel: string; tone?: 'default' | 'danger'; busy?: boolean; onClose: () => void; onConfirm: () => void; children: ReactNode }) {
+function ConfirmDialog({ open, title, heading, confirmLabel, tone = 'default', busy = false, onClose, onCancel, cancelLabel = 'Voltar', onConfirm, children }: { open: boolean; title: string; heading?: string; confirmLabel: string; tone?: 'default' | 'danger'; busy?: boolean; onClose: () => void; onCancel?: () => void; cancelLabel?: string; onConfirm: () => void; children: ReactNode }) {
   const titleId = useId()
   const closeRef = useRef(onClose)
   const busyRef = useRef(busy)
@@ -1451,7 +1452,7 @@ function ConfirmDialog({ open, title, confirmLabel, tone = 'default', busy = fal
     }
   }, [open, titleId])
   if (!open) return null
-  return <div className="dialog-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget && !busy) onClose() }}><section className="confirm-dialog" role="dialog" aria-modal="true" aria-labelledby={titleId}><span className={`dialog-stroke ${tone}`} aria-hidden="true" /><h2 id={titleId}>{title}</h2><div className="dialog-copy">{children}</div><div className="dialog-actions"><button className="dialog-cancel" autoFocus disabled={busy} onClick={onClose}>Voltar</button><button className={tone === 'danger' ? 'dialog-confirm danger' : 'dialog-confirm'} disabled={busy} onClick={onConfirm}>{busy ? 'Aguarde…' : confirmLabel}</button></div></section></div>
+  return <div className="dialog-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget && !busy) onClose() }}><section className={`confirm-dialog${heading ? ' with-brand-header' : ''}`} role="dialog" aria-modal="true" aria-labelledby={titleId}>{heading ? <header className="confirm-brand-header"><div><small className="guide-eyebrow">{heading}</small><h2 id={titleId}>{title}</h2></div><button className="icon-button" aria-label="Fechar" disabled={busy} onClick={onClose}><X /></button></header> : <><span className={`dialog-stroke ${tone}`} aria-hidden="true" /><h2 id={titleId}>{title}</h2></>}<div className="dialog-copy">{children}</div><div className="dialog-actions"><button className="dialog-cancel" autoFocus disabled={busy} onClick={onCancel ?? onClose}>{cancelLabel}</button><button className={tone === 'danger' ? 'dialog-confirm danger' : 'dialog-confirm'} disabled={busy} onClick={onConfirm}>{busy ? 'Aguarde…' : confirmLabel}</button></div></section></div>
 }
 
 function SimpleEmpty({ icon, title, text, action }: { icon: ReactNode; title: string; text?: string; action?: ReactNode }) {
@@ -1557,9 +1558,9 @@ function isLikelyHeic(file: File) {
   return ['image/heic', 'image/heif', 'image/heic-sequence', 'image/heif-sequence', 'image/x-heic', 'image/x-heif'].includes(file.type.toLocaleLowerCase()) || /\.(heic|heif)$/i.test(file.name)
 }
 
-function formatSetSummary(set: WorkoutSet, metrics: WorkoutMetric[], unit: Profile['loadUnit']) {
+function formatSetSummary(set: WorkoutSet, metrics: WorkoutMetric[], unit?: Profile['loadUnit']) {
   return (set.metrics ?? metrics).map((metric) => {
-    if (metric === 'load') return `${formatLocalizedNumber(set.load)} ${unit}`
+    if (metric === 'load') return `${formatLocalizedNumber(set.load)} ${set.loadUnit ?? unit ?? '(unidade não registrada)'}`
     if (metric === 'reps') return `${formatLocalizedNumber(set.reps)} reps`
     if (metric === 'distance') return `${formatLocalizedNumber(set.distanceKm)} km`
     return `${formatLocalizedNumber(set.durationMinutes)} min`

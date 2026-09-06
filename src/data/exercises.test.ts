@@ -9,9 +9,8 @@ describe('catálogo curado de exercícios', () => {
     expect(exercise?.media?.posterSrc).toMatch(/exercise-media\/agachamento-livre\/poster\.webp$/)
     expect(exercise?.media?.motionSrc).toMatch(/exercise-media\/agachamento-livre\/movimento\.webp$/)
     expect(exercise?.curation).toMatchObject({
-      primaryMuscles: ['Quadríceps'],
+      primaryMuscles: ['Quadríceps', 'Glúteos'],
       movementPattern: 'Agachamento',
-      stimulusToFatigue: 'moderado',
       reviewStatus: 'em-revisao',
       source: {
         name: 'ExerciseAPI',
@@ -27,9 +26,8 @@ describe('catálogo curado de exercícios', () => {
     expect(exercise?.media?.posterSrc).toMatch(/exercise-media\/leg-press\/poster\.webp$/)
     expect(exercise?.media?.motionSrc).toMatch(/exercise-media\/leg-press\/movimento\.webp$/)
     expect(exercise?.curation).toMatchObject({
-      primaryMuscles: ['Quadríceps'],
+      primaryMuscles: ['Quadríceps', 'Glúteos'],
       movementPattern: 'Empurrar com as pernas',
-      stimulusToFatigue: 'moderado',
       reviewStatus: 'em-revisao',
       source: {
         name: 'ExerciseAPI',
@@ -45,7 +43,7 @@ describe('catálogo curado de exercícios', () => {
     expect(exercise?.media?.posterSrc).toMatch(/exercise-media\/stiff\/poster\.webp$/)
     expect(exercise?.media?.motionSrc).toMatch(/exercise-media\/stiff\/movimento\.webp$/)
     expect(exercise?.curation).toMatchObject({
-      primaryMuscles: ['Posteriores de coxa'],
+      primaryMuscles: ['Posteriores de coxa', 'Glúteos'],
       movementPattern: 'Dobradiça de quadril',
       reviewStatus: 'em-revisao',
       source: { recordId: 'romanian_deadlift' },
@@ -53,13 +51,21 @@ describe('catálogo curado de exercícios', () => {
   })
 
   it('mantém pôster, movimento e curadoria em todo o catálogo do sistema', () => {
-    expect(exercises).toHaveLength(37)
+    expect(exercises).toHaveLength(50)
+    expect(new Set(exercises.map(exercise => exercise.id)).size).toBe(50)
 
     for (const exercise of exercises) {
       expect(exercise.media, `${exercise.id}: mídia`).toBeDefined()
       expect(exercise.curation, `${exercise.id}: curadoria`).toBeDefined()
       expect(exercise.curation?.reviewStatus, `${exercise.id}: revisão`).toBe('em-revisao')
-      expect(exercise.curation?.primaryMuscles.length, `${exercise.id}: foco principal`).toBeGreaterThan(0)
+      if (exercise.analysis?.kind === 'movement') expect(exercise.curation?.primaryMuscles.length, `${exercise.id}: foco principal`).toBeGreaterThan(0)
+      else expect(exercise.curation?.primaryMuscles, `${exercise.id}: sessão ampla não inventa músculos`).toEqual([])
+      expect(exercise.analysis?.version, `${exercise.id}: versão`).toBeTruthy()
+      expect(exercise.editorial?.setup, `${exercise.id}: preparação`).toBeTruthy()
+      expect(exercise.editorial?.care, `${exercise.id}: cuidados`).toBeTruthy()
+      expect(exercise.editorial?.references.length, `${exercise.id}: fontes complementares`).toBeGreaterThan(0)
+      expect(exercise.curation?.stimulusToFatigue).toBeUndefined()
+      expect(exercise.curation?.suggestedRepRange).toBeUndefined()
       expect(exercise.curation?.movementPattern, `${exercise.id}: padrão de movimento`).toBeTruthy()
       expect(exercise.curation?.source.url, `${exercise.id}: fonte`).toMatch(/^https:\/\//)
 
