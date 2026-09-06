@@ -53,7 +53,7 @@ export default defineConfig({
         description: 'Seu treino, do jeito que aconteceu.',
         id: basePath,
         theme_color: '#f6f1e3',
-        background_color: '#f6f1e3',
+        background_color: '#ea6b7e',
         display: 'standalone',
         orientation: 'portrait-primary',
         start_url: `${basePath}#/`,
