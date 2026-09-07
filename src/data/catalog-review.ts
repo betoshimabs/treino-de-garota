@@ -1,8 +1,8 @@
 import type { Exercise, ExerciseAnalysis, ExperienceLevel, LoadConvention, MuscleRegionId, TrainingFocus } from '../types'
-import { muscleMapping } from '../muscle-map'
+import { canonicalRegions, muscleGroups, macroGroups } from '../muscle-taxonomy'
 import { editorialReferences } from './editorial-references'
 
-export const CATALOG_VERSION = '2026-09-06.1'
+export const CATALOG_VERSION = '2026-09-07.1'
 type Review = { analysis: ExerciseAnalysis; setup: string; care: string; name?: string }
 const review = (focus: TrainingFocus, familiarity: ExperienceLevel, loadConvention: LoadConvention,
   primaryRegions: MuscleRegionId[], secondaryRegions: MuscleRegionId[], setup: string, care: string,
@@ -79,15 +79,17 @@ export function recordingHint(analysis: ExerciseAnalysis) {
 export function applyCatalogReview(exercise: Exercise): Exercise {
   const row = catalogReview[exercise.id]
   if (!row) return exercise
-  // The detailed muscle list is the single source for both schematic and analytics.
-  const mapRegions = (names: string[]) => [...new Set(names.flatMap(name => muscleMapping(name)?.regions ?? []))]
-  const primaryRegions = row.analysis.kind === 'session' ? [] : mapRegions(exercise.curation?.primaryMuscles ?? [])
-  const secondaryRegions = row.analysis.kind === 'session' ? [] : mapRegions(exercise.curation?.secondaryMuscles ?? []).filter(region => !primaryRegions.includes(region))
+  // Reviewed variant assignments are the source for labels, filters, SVG and new snapshots.
+  // Whole activities have variable contents: do not turn their sample pose into muscle data.
+  const primaryRegions = row.analysis.kind === 'session' ? [] : canonicalRegions(row.analysis.primaryRegions)
+  const secondaryRegions = row.analysis.kind === 'session' ? [] : canonicalRegions(row.analysis.secondaryRegions).filter(region => !primaryRegions.includes(region))
   const analysis = { ...row.analysis, primaryRegions, secondaryRegions }
-  return { ...exercise, name: row.name ?? exercise.name, aliases: [...new Set([...exercise.aliases, exercise.name])], analysis,
+  const macro = macroGroups.find(group => group.label === exercise.group && group.groups.some(region => primaryRegions.includes(region)))
+    ?? macroGroups.find(group => group.groups.some(region => region === primaryRegions[0]))
+  return { ...exercise, group: macro?.label ?? exercise.group, name: row.name ?? exercise.name, aliases: [...new Set([...exercise.aliases, exercise.name, exercise.group])], analysis,
     editorial: { reviewedAt: '2026-09-06', setup: row.setup, care: row.care, recordingHint: recordingHint(analysis), references: editorialReferences[exercise.id] ?? [] },
     curation: exercise.curation ? { ...exercise.curation, stimulusToFatigue: undefined, suggestedRepRange: undefined,
-      ...(row.analysis.kind === 'session' ? { primaryMuscles: [], secondaryMuscles: [] } : {}),
+      primaryMuscles: primaryRegions.map(region => muscleGroups[region]), secondaryMuscles: secondaryRegions.map(region => muscleGroups[region]),
     } : undefined,
   }
 }

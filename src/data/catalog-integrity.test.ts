@@ -29,7 +29,7 @@ describe('integridade editorial e de mídia', () => {
     for (const exercise of exercises) {
       const primary = [...new Set(exercise.curation!.primaryMuscles.flatMap(name => muscleMapping(name)?.regions ?? []))]
       expect(exercise.analysis!.primaryRegions, exercise.id).toEqual(primary)
-      expect(exercise.analysis!.secondaryRegions.some(region => primary.includes(region))).toBe(false)
+      expect(exercise.analysis!.secondaryRegions.some(region => primary.some(id => id === region))).toBe(false)
       if (exercise.category === 'strength') expect(primary.length, exercise.id).toBeGreaterThan(0)
     }
   })

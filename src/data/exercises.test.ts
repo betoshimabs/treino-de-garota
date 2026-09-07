@@ -43,7 +43,7 @@ describe('catálogo curado de exercícios', () => {
     expect(exercise?.media?.posterSrc).toMatch(/exercise-media\/stiff\/poster\.webp$/)
     expect(exercise?.media?.motionSrc).toMatch(/exercise-media\/stiff\/movimento\.webp$/)
     expect(exercise?.curation).toMatchObject({
-      primaryMuscles: ['Posteriores de coxa', 'Glúteos'],
+      primaryMuscles: ['Posteriores', 'Glúteos'],
       movementPattern: 'Dobradiça de quadril',
       reviewStatus: 'em-revisao',
       source: { recordId: 'romanian_deadlift' },

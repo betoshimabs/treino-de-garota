@@ -10,7 +10,7 @@ export type ProfileAvatar = { type: 'preset'; presetId: AvatarPresetId } | { typ
 
 export type ExperienceLevel = 'Iniciante' | 'Intermediário' | 'Avançado'
 export type TrainingFocus = 'Corpo inteiro' | 'Inferiores' | 'Superiores' | 'Core' | 'Cardio' | 'Prática livre'
-export type MuscleRegionId = 'chest' | 'shoulders' | 'biceps' | 'triceps' | 'forearms' | 'abs' | 'obliques' | 'upperBack' | 'lats' | 'lowerBack' | 'glutes' | 'hips' | 'quads' | 'adductors' | 'hamstrings' | 'calves'
+export type MuscleRegionId = 'chest' | 'shoulders' | 'biceps' | 'triceps' | 'forearms' | 'abs' | 'obliques' | 'upperBack' | 'lats' | 'lowerBack' | 'glutes' | 'hips' | 'quads' | 'adductors' | 'hamstrings' | 'calves' | 'back' | 'abductors'
 export type LoadConvention = 'total' | 'per-implement' | 'machine' | 'assistance' | 'none'
 export interface ExerciseAnalysis {
   version: string
