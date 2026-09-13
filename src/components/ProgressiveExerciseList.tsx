@@ -27,6 +27,6 @@ export function ProgressiveExerciseList({ exercises, onAdd }: { exercises: Exerc
     {exercises.slice(0, shown).map(exercise => <button key={exercise.id} onClick={() => onAdd(exercise)}><ExerciseArtwork exercise={exercise} compact /><span><strong>{exercise.name}</strong><small>{exercise.group} · {exercise.equipment}</small></span><Plus size={19} /></button>)}
     {!exercises.length && <p className="muted">Nenhum exercício encontrado.</p>}
     {hasMore && <button ref={more} className="picker-load-more" onClick={() => setLimit(current => current + PAGE_SIZE)}>Mostrar mais {Math.min(PAGE_SIZE, exercises.length - shown)}</button>}
-    <span className="sr-only" role="status" aria-live="polite">{shown} de {exercises.length} exercícios exibidos</span>
+    <p className="picker-result-count" role="status" aria-live="polite">{shown} de {exercises.length} exercícios e atividades{!hasMore && exercises.length > 0 ? ' · Fim da lista' : ''}</p>
   </div>
 }

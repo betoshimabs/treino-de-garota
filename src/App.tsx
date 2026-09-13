@@ -37,7 +37,7 @@ import { CURRENT_RELEASE, getInitialUpdateFlow, type AppRelease, type UpdateFlow
 import { db, clearAllData, defaultProfile, loadSnapshot, saveProfile, mutateActiveWorkout } from './db'
 import { WorkoutGuide } from './components/WorkoutGuide'
 import { completedItemSummary, itemFinished, recordGuidedSet, restTotal, settleRests } from './workout-guide'
-import { MuscleMap } from './components/MuscleMap'
+import { ExerciseDetailModal, ExerciseDetailView } from './components/ExerciseDetailView'
 import { Evolution } from './components/Evolution'
 import { TemplateLibrary } from './components/TemplateLibrary'
 import { recordingHint } from './data/catalog-review'
@@ -396,13 +396,15 @@ function TodayPage({ data, refresh, allExercises, allTemplates }: SharedProps) {
   )
 }
 
-function WorkoutPage({ data, refresh, setNotice, allExercises, allTemplates }: SharedProps) {
+export function WorkoutPage({ data, refresh, setNotice, allExercises, allTemplates }: SharedProps) {
   const navigate = useNavigate()
   const workoutUnit = data.workouts.find(workout => workout.status === 'active')?.loadUnit ?? data.profile.loadUnit
   const active = data.workouts.find((workout) => workout.status === 'active')
   const [pickerOpen, setPickerOpen] = useState(false)
   const [pickerMode, setPickerMode] = useState<'exercise' | 'template'>('exercise')
   const [query, setQuery] = useState('')
+  const [pickerCategory, setPickerCategory] = useState<'all' | 'strength' | 'activities'>('all')
+  const [detailExercise, setDetailExercise] = useState<Exercise>()
   const [feeling, setFeeling] = useState<Feeling | undefined>(active?.feeling)
   const [section, setSection] = useState<'strength' | 'activities'>('strength')
   const [finishConfirm, setFinishConfirm] = useState(false)
@@ -473,7 +475,7 @@ function WorkoutPage({ data, refresh, setNotice, allExercises, allTemplates }: S
     await mutateActiveWorkout(active.id, latest => ({ ...latest, items: latest.items.map((item) => item.id === itemId ? fn(item) : item) }))
     await refresh()
   }
-  const openPicker = () => { setPickerMode('exercise'); setQuery(''); setPickerOpen(true) }
+  const openPicker = () => { setPickerMode('exercise'); setPickerCategory('all'); setQuery(''); setPickerOpen(true) }
   const closePicker = () => { setPickerOpen(false); setQuery('') }
   const toWorkoutItem = (exercise: Exercise): WorkoutItem => ({
     id: makeId(), exerciseId: exercise.id, exerciseName: exercise.name, category: exercise.category, metricMode: exercise.metricMode,
@@ -593,7 +595,7 @@ function WorkoutPage({ data, refresh, setNotice, allExercises, allTemplates }: S
     navigate('/')
   }
   const filtered = allExercises.filter((exercise) => {
-    const inSection = section === 'strength' ? exercise.category === 'strength' : exercise.category !== 'strength'
+    const inSection = pickerCategory === 'all' || (pickerCategory === 'strength' ? exercise.category === 'strength' : exercise.category !== 'strength')
     return inSection && `${exercise.name} ${exercise.aliases.join(' ')}`.toLocaleLowerCase().includes(query.toLocaleLowerCase())
   })
   const filteredTemplates = allTemplates.filter((template) => {
@@ -669,7 +671,7 @@ function WorkoutPage({ data, refresh, setNotice, allExercises, allTemplates }: S
         </div>
       ) : <>
         <section id={`workout-item-${currentItem.id}`} className="exercise-block current" aria-labelledby={`exercise-${currentItem.id}`}>
-            <div className="exercise-block-title"><span>{String(currentItemIndex + 1).padStart(2, '0')}</span><h2 id={`exercise-${currentItem.id}`}>{currentItem.exerciseName}</h2><button className="icon-button small" aria-label={`Remover ${currentItem.exerciseName}`} onClick={() => void persist({ ...active, items: active.items.filter((row) => row.id !== currentItem.id) })}><X /></button></div>
+            <div className="exercise-block-title"><span>{String(currentItemIndex + 1).padStart(2, '0')}</span><div className="exercise-name-with-detail"><h2 id={`exercise-${currentItem.id}`}>{currentItem.exerciseName}</h2>{allExercises.some(exercise => exercise.id === currentItem.exerciseId) && <button className="exercise-detail-link" aria-haspopup="dialog" aria-label={`Detalhes de ${currentItem.exerciseName}`} onClick={() => setDetailExercise(allExercises.find(exercise => exercise.id === currentItem.exerciseId))}>Detalhes</button>}</div><button className="icon-button small" aria-label={`Remover ${currentItem.exerciseName}`} onClick={() => void persist({ ...active, items: active.items.filter((row) => row.id !== currentItem.id) })}><X /></button></div>
             <MetricSelector item={currentItem} unit={workoutUnit} onToggle={(metric) => void toggleMetric(currentItem.id, metric)} />
             <div className="set-head"><span>{currentItem.category === 'strength' ? 'Série' : 'Reg.'}</span><MetricLabels metrics={currentItem.metrics ?? defaultMetricsForMode(currentItem.metricMode)} unit={workoutUnit} /><span>Feito</span><span aria-hidden="true" /></div>
             {currentItem.sets.map((set, setIndex) => (
@@ -688,7 +690,8 @@ function WorkoutPage({ data, refresh, setNotice, allExercises, allTemplates }: S
 
       <WorkoutGuide workout={active} unit={active.loadUnit ?? workoutUnit} refresh={refresh} onFocus={focusWorkoutItem} onAdd={openPicker} onFinish={askToFinish} />
 
-      {pickerOpen && <div className="sheet-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) closePicker() }}><section className="bottom-sheet exercise-picker-sheet" role="dialog" aria-modal="true" aria-labelledby="picker-title"><div className="sheet-handle" /><header><h2 id="picker-title">Adicionar ao treino</h2><button className="icon-button" aria-label="Fechar" onClick={closePicker}><X /></button></header><div className="picker-tabs" role="tablist" aria-label="O que adicionar"><button role="tab" aria-selected={pickerMode === 'exercise'} className={pickerMode === 'exercise' ? 'selected' : ''} onClick={() => { setPickerMode('exercise'); setQuery('') }}>Exercício</button><button role="tab" aria-selected={pickerMode === 'template'} className={pickerMode === 'template' ? 'selected' : ''} onClick={() => { setPickerMode('template'); setQuery('') }}>Modelo</button></div><label className="search-field"><Search size={19} /><input placeholder={pickerMode === 'exercise' ? (section === 'strength' ? 'Buscar exercício' : 'Buscar cardio ou atividade') : 'Buscar modelo'} value={query} onChange={(event) => setQuery(event.target.value)} /></label>{pickerMode === 'exercise' ? <ProgressiveExerciseList key={JSON.stringify([section, query])} exercises={filtered} onAdd={exercise => void addExercise(exercise)} /> : <div className="picker-list picker-template-list" tabIndex={-1}>{filteredTemplates.map((template) => <button key={template.id} onClick={() => void addTemplate(template)}><span className="template-picker-mark" /><span><strong>{template.name}</strong><small>{template.note}</small><em>{template.exerciseIds.slice(0, 3).map((id) => allExercises.find((exercise) => exercise.id === id)?.name).filter(Boolean).join(' · ')}</em></span><Plus size={19} /></button>)}</div>}</section></div>}
+      {pickerOpen && <div className="sheet-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) closePicker() }}><section className="bottom-sheet exercise-picker-sheet" role="dialog" aria-modal="true" aria-labelledby="picker-title"><div className="sheet-handle" /><header><h2 id="picker-title">Adicionar ao treino</h2><button className="icon-button" aria-label="Fechar" onClick={closePicker}><X /></button></header><div className="picker-tabs" role="tablist" aria-label="O que adicionar"><button role="tab" aria-selected={pickerMode === 'exercise'} className={pickerMode === 'exercise' ? 'selected' : ''} onClick={() => { setPickerMode('exercise'); setQuery('') }}>Exercício</button><button role="tab" aria-selected={pickerMode === 'template'} className={pickerMode === 'template' ? 'selected' : ''} onClick={() => { setPickerMode('template'); setQuery('') }}>Modelo</button></div><label className="search-field"><Search size={19} /><input placeholder={pickerMode === 'exercise' ? 'Buscar exercício ou atividade' : 'Buscar modelo'} value={query} onChange={(event) => setQuery(event.target.value)} /></label>{pickerMode === 'exercise' ? <><div className="picker-category-filter" role="group" aria-label="Filtrar catálogo">{([['all', 'Todos'], ['strength', 'Musculação'], ['activities', 'Cardio e outras']] as const).map(([value, label]) => <button key={value} aria-pressed={pickerCategory === value} onClick={() => setPickerCategory(value)}>{label}</button>)}</div><ProgressiveExerciseList key={JSON.stringify([pickerCategory, query])} exercises={filtered} onAdd={exercise => void addExercise(exercise)} /></> : <div className="picker-list picker-template-list" tabIndex={-1}>{filteredTemplates.map((template) => <button key={template.id} onClick={() => void addTemplate(template)}><span className="template-picker-mark" /><span><strong>{template.name}</strong><small>{template.note}</small><em>{template.exerciseIds.slice(0, 3).map((id) => allExercises.find((exercise) => exercise.id === id)?.name).filter(Boolean).join(' · ')}</em></span><Plus size={19} /></button>)}</div>}</section></div>}
+      {detailExercise && <ExerciseDetailModal exercise={detailExercise} favorite={data.favorites.includes(detailExercise.id)} onClose={() => setDetailExercise(undefined)} onToggleFavorite={() => void toggleExerciseFavorite(detailExercise.id, data, refresh)} />}
 
       <ConfirmDialog open={pendingFinish.length > 0} title="Ficou exercício pendente" heading="Antes de guardar" cancelLabel="Ir para exercício" onCancel={() => { const pending = active.items.find(item => item.id === pendingFinish[0]?.id); setPendingFinish([]); if (pending) focusWorkoutItem(pending) }} confirmLabel="Finalizar mesmo assim" onClose={() => setPendingFinish([])} onConfirm={() => { setPendingFinish([]); void askToFinish(true) }}>
         <p>{pendingFinish.length === 1 ? <><strong>{pendingFinish[0]?.exerciseName}</strong> ainda não foi concluído.</> : <>Ainda há exercícios não concluídos:</>}</p>
@@ -1096,43 +1099,13 @@ function TemplateSheet({ exercises, onClose, onSaved }: { exercises: Exercise[];
 function ExerciseDetail({ allExercises, data, refresh }: { allExercises: Exercise[]; data: AppSnapshot; refresh: () => Promise<void> }) {
   const { id } = useParams(); const navigate = useNavigate(); const exercise = allExercises.find((item) => item.id === id)
   if (!exercise) return <SimpleEmpty icon={<BookOpen />} title="Exercício não encontrado" />
-  const favorite = data.favorites.includes(exercise.id)
-  return (
-    <div className="page detail-page">
-      <header className="detail-top">
-        <button className="icon-button" aria-label="Voltar" onClick={() => navigate(-1)}><ArrowLeft /></button>
-        <button className="icon-button soft" aria-label={favorite ? 'Desfavoritar' : 'Favoritar'} onClick={async () => { if (favorite) await db.favorites.delete(exercise.id); else await db.favorites.put({ exerciseId: exercise.id }); await refresh() }}><Heart fill={favorite ? 'currentColor' : 'none'} /></button>
-      </header>
-      <p className="eyebrow">{exercise.group} · {exercise.equipment}</p>
-      <h1>{exercise.name}</h1>
-      <div className={`detail-illustration${exercise.media ? ' has-media' : ''}`}>
-        <ExerciseArtwork exercise={exercise} />
-        <small>{exercise.analysis?.kind === 'session' ? 'Cena representativa da atividade' : exercise.media ? 'Início e execução' : 'Ilustração demonstrativa em preparação'}</small>
-      </div>
-      {exercise.curation && (
-        <section className="exercise-facts" aria-labelledby="exercise-facts-title">
-          <div className="exercise-facts-heading">
-            <div><p className="eyebrow">Um olhar rápido</p><h2 id="exercise-facts-title">Sobre o exercício</h2></div>
-            {exercise.curation.reviewStatus === 'em-revisao' && <small>Conteúdo em revisão</small>}
-          </div>
-          <dl>
-            <div><dt>Padrão</dt><dd>{exercise.curation.movementPattern}</dd></div>
-            {exercise.analysis && <div><dt>Familiaridade sugerida</dt><dd>{exercise.analysis.familiarity}</dd></div>}
-            {exercise.analysis && <div><dt>Foco</dt><dd>{exercise.analysis.focus}</dd></div>}
-          </dl>
-        </section>
-      )}
-      {exercise.curation && exercise.analysis?.kind !== 'session' && <MuscleMap key={exercise.id} curation={exercise.curation} />}
-      {exercise.editorial && <section className="exercise-editorial"><h2>Antes de começar</h2><p>{exercise.editorial.setup}</p><p>{exercise.editorial.care}</p><h3>Como registrar</h3><p>{exercise.editorial.recordingHint}</p><small>Familiaridade é uma classificação editorial da execução, não uma avaliação da sua capacidade.</small></section>}
-      <section>
-        <p className="eyebrow">Um passo de cada vez</p>
-        <ol className="instruction-list">{exercise.instructions.map((instruction, index) => <li key={instruction}><span>{index + 1}</span><p>{instruction}</p></li>)}</ol>
-      </section>
-      <aside className="care-note"><Info size={18} /><p>A demonstração ajuda a reconhecer o movimento, mas não mostra todos os ajustes. Use como referência geral; ela não substitui orientação profissional.</p></aside>
-      {exercise.curation && <p className="exercise-attribution">Dados adaptados de <a href={exercise.curation.source.url} target="_blank" rel="noreferrer">{exercise.curation.source.name}</a> · {exercise.curation.source.license}</p>}
-      {exercise.editorial && <details className="evolution-details"><summary>Referências e revisão <ChevronDown size={17} /></summary><p className="muted">Conteúdo em constante revisão e validação por profissional.</p><ul>{exercise.editorial.references.map(reference => <li key={reference.url}><a href={reference.url} target="_blank" rel="noreferrer">{reference.name}</a></li>)}</ul></details>}
-    </div>
-  )
+  return <ExerciseDetailView exercise={exercise} favorite={data.favorites.includes(exercise.id)} onClose={() => navigate(-1)} onToggleFavorite={() => void toggleExerciseFavorite(exercise.id, data, refresh)} />
+}
+
+async function toggleExerciseFavorite(id: string, data: AppSnapshot, refresh: () => Promise<void>) {
+  if (data.favorites.includes(id)) await db.favorites.delete(id)
+  else await db.favorites.put({ exerciseId: id })
+  await refresh()
 }
 
 function EvolutionPage({ data, allExercises }: { data: AppSnapshot; allExercises: Exercise[] }) {
