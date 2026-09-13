@@ -485,7 +485,8 @@ h2 { font-size: 1.35rem; line-height: 1.05; }
 .picker-tabs { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; margin: 7px 0 12px; }
 .picker-tabs button { min-height: 44px; border-radius: 13px; background: rgba(255, 253, 248, .62); color: var(--muted); }
 .picker-tabs button.selected { background: var(--pool); color: var(--ink); font-weight: 800; }
-.picker-list { flex: 1 1 auto; min-height: 0; overflow-x: hidden; overflow-y: auto; overscroll-behavior: contain; scroll-padding-block: 10px 24px; margin: 15px -3px 0; padding: 0 3px calc(12px + env(safe-area-inset-bottom)); }
+.picker-list { position: relative; flex: 1 1 auto; min-height: 0; overflow-x: hidden; overflow-y: auto; overscroll-behavior: contain; scroll-padding-block: 10px 24px; margin: 15px -3px 0; padding: 0 3px calc(12px + env(safe-area-inset-bottom)); }
+.picker-list button.picker-load-more { display: block; width: 100%; min-height: 44px; margin-top: 8px; text-align: center; font-weight: 700; background: var(--pink-paper); border-radius: 12px; }
 .picker-list button { width: 100%; min-height: 70px; overflow: hidden; display: grid; grid-template-columns: 52px minmax(0, 1fr) auto; gap: 10px; align-items: center; text-align: left; background: transparent; border-top: 1px solid var(--line); padding: 7px 3px; }
 .picker-list button > span:nth-child(2) { min-width: 0; }
 .picker-list strong, .picker-list small { display: block; }
