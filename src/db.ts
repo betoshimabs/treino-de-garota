@@ -1,4 +1,5 @@
 import Dexie, { type EntityTable } from 'dexie'
+import type { ManualSubmission } from './manual-exercise-data'
 import type { AppSnapshot, Exercise, Profile, TimelineEntry, Workout, WorkoutTemplate } from './types'
 
 const defaultProfile: Profile = {
@@ -16,6 +17,7 @@ class TreinoDatabase extends Dexie {
   customExercises!: EntityTable<Exercise, 'id'>
   customTemplates!: EntityTable<WorkoutTemplate, 'id'>
   profiles!: EntityTable<Profile, 'id'>
+  manualOutbox!: EntityTable<ManualSubmission, 'id'>
 
   constructor(name: string) {
     super(name)
@@ -48,6 +50,7 @@ class TreinoDatabase extends Dexie {
         exercise.visual ??= 'flow'
       })
     })
+    this.version(3).stores({ manualOutbox: 'id, ownerUid, nextAttempt' })
   }
 }
 
@@ -168,7 +171,7 @@ export async function mutateActiveWorkout(id: string, change: (workout: Workout)
 }
 
 export async function clearAllData() {
-  await db.transaction('rw', [db.workouts, db.timeline, db.favorites, db.customExercises, db.customTemplates, db.profiles], async () => {
+  await db.transaction('rw', [db.workouts, db.timeline, db.favorites, db.customExercises, db.customTemplates, db.profiles, db.manualOutbox], async () => {
     await Promise.all([
       db.workouts.clear(),
       db.timeline.clear(),
@@ -176,6 +179,7 @@ export async function clearAllData() {
       db.customExercises.clear(),
       db.customTemplates.clear(),
       db.profiles.clear(),
+      db.manualOutbox.clear(),
     ])
   })
 }

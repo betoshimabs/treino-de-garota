@@ -47,6 +47,8 @@ import { avatarCropRect, avatarPresets, constrainAvatarCrop, profileAvatarSource
 import { calculateBmi, defaultMetricsForMode, formatLocalizedNumber, isSetValidForMetrics, kgToLb, lbToKg, parseLocalizedNumber, workoutMetricOrder } from './domain'
 import { ExerciseArtwork } from './components/ExerciseVisual'
 import { ProgressiveExerciseList } from './components/ProgressiveExerciseList'
+import { ManualExerciseSheet } from './components/ManualExerciseSheet'
+import { syncManualExercises } from './manual-exercises'
 import { BrandLoading, BrandMotion, useOpeningReady } from './components/BrandLoading'
 import { applyAppUpdate } from './pwa-update'
 import { canShowInstallNudge, consumeCapturedInstallPrompt, getInstallPlatform, getManualInstallSteps, INSTALL_SNOOZE_DURATION_MS, INSTALL_SNOOZE_KEY, subscribeToInstallPrompt, type BeforeInstallPromptEvent, type InstallPlatform } from './pwa-install'
@@ -90,6 +92,13 @@ function App() {
 }
 
 function AppContent() {
+  useEffect(() => {
+    const sync = () => { void syncManualExercises() }
+    sync()
+    window.addEventListener('online', sync)
+    const timer = window.setInterval(sync, 30_000)
+    return () => { window.removeEventListener('online', sync); window.clearInterval(timer) }
+  }, [])
   const [data, setData] = useState<AppSnapshot>(emptySnapshot)
   const [loading, setLoading] = useState(true)
   const [loadError, setLoadError] = useState(false)
@@ -103,7 +112,7 @@ function AppContent() {
   const [appInstalled, setAppInstalled] = useState(() => isAppRunningInstalled())
   const installPlatform = getInstallPlatform(navigator.userAgent, navigator.platform, navigator.maxTouchPoints)
   const location = useLocation()
-  const headerTabIndex = ['/', '/linha', '/exercicios', '/evolucao', '/eu'].indexOf(location.pathname)
+  const headerTabIndex = ['/', '/linha', '/exercicios', '/evolucao', '/panelinha'].indexOf(location.pathname)
   const [headerTravel, setHeaderTravel] = useState({ from: Math.max(0, headerTabIndex), to: Math.max(0, headerTabIndex) })
   if (headerTabIndex >= 0 && headerTabIndex !== headerTravel.to) {
     setHeaderTravel({ from: headerTravel.to, to: headerTabIndex })
@@ -266,6 +275,7 @@ function AppContent() {
           <Route path="/exercicios/:id" element={<ExerciseDetail allExercises={allExercises} data={data} refresh={refresh} />} />
           <Route path="/evolucao" element={<EvolutionPage data={data} allExercises={allExercises} />} />
           <Route path="/eu" element={<ProfilePage {...shared} />} />
+          <Route path="/panelinha" element={<PanelinhaPage />} />
           <Route path="*" element={<TodayPage {...shared} />} />
         </Routes>
       </main>
@@ -309,9 +319,9 @@ function Onboarding({ profile, onDone }: { profile: Profile; onDone: (profile: P
   )
 }
 
-type PageHeaderVariant = 'home' | 'timeline' | 'library' | 'evolution' | 'profile'
+type PageHeaderVariant = 'home' | 'timeline' | 'library' | 'evolution' | 'profile' | 'panelinha'
 
-function PageHeader({ eyebrow, title, action, variant }: { eyebrow?: string; title: string; action?: ReactNode; variant: PageHeaderVariant }) {
+function PageHeader({ eyebrow, title, action, variant }: { eyebrow?: ReactNode; title: string; action?: ReactNode; variant: PageHeaderVariant }) {
   return <header className={`page-header header-${variant}`}>
     <svg className="page-header-ribbon" viewBox="0 0 760 200" preserveAspectRatio="none" aria-hidden="true" focusable="false">
       <path d="M-760-100V112H-200C40 112 112 196 350 196C586 196 680 120 960 120H1520V-100Z" />
@@ -320,8 +330,15 @@ function PageHeader({ eyebrow, title, action, variant }: { eyebrow?: string; tit
   </header>
 }
 
-function TodayPage({ data, refresh, allExercises, allTemplates }: SharedProps) {
+function TodayPage({ data, refresh, allExercises, allTemplates, setNotice }: SharedProps) {
   const navigate = useNavigate()
+  const [avatarPickerOpen, setAvatarPickerOpen] = useState(false)
+  const avatarEditButton = useRef<HTMLButtonElement>(null)
+  const avatarSource = profileAvatarSource(data.profile.avatar, import.meta.env.BASE_URL)
+  const closeAvatarPicker = () => {
+    setAvatarPickerOpen(false)
+    window.requestAnimationFrame(() => avatarEditButton.current?.focus())
+  }
   const completed = data.workouts.filter((workout) => workout.status === 'completed')
   const active = data.workouts.find((workout) => workout.status === 'active')
   const now = new Date()
@@ -347,7 +364,7 @@ function TodayPage({ data, refresh, allExercises, allTemplates }: SharedProps) {
         metrics: item.metrics ?? defaultMetricsForMode(item.metricMode),
         analysis: allExercises.find(exercise => exercise.id === item.exerciseId)?.analysis,
         sets: [{ id: makeId(), completed: false }],
-      })) ?? templateItems?.map((exercise) => ({ id: makeId(), exerciseId: exercise.id, exerciseName: exercise.name, category: exercise.category, metricMode: exercise.metricMode, analysis: exercise.analysis, metrics: defaultMetricsForMode(exercise.metricMode), sets: [{ id: makeId(), completed: false }] })) ?? [],
+      })) ?? templateItems?.map((exercise) => ({ id: makeId(), exerciseId: exercise.id, exerciseName: exercise.name, category: exercise.category, metricMode: exercise.metricMode, analysis: exercise.analysis, metrics: exercise.defaultMetrics ?? defaultMetricsForMode(exercise.metricMode), sets: [{ id: makeId(), completed: false }] })) ?? [],
     }
     await db.workouts.put(workout)
     await refresh()
@@ -356,7 +373,8 @@ function TodayPage({ data, refresh, allExercises, allTemplates }: SharedProps) {
 
   return (
     <div className="page today-page">
-      <PageHeader variant="home" eyebrow={`${greeting}${data.profile.nickname ? `, ${data.profile.nickname}` : ''}`} title={getWeekdayInvitation(now)} action={<span className="date-stamp">{formatDay(now.toISOString())}</span>} />
+      <PageHeader variant="home" eyebrow={<span className="home-greeting"><span>{greeting}{data.profile.nickname ? `, ${data.profile.nickname}` : ''}</span><time dateTime={now.toLocaleDateString('sv-SE')}>{formatDay(now.toISOString())}</time></span>} title={getWeekdayInvitation(now)} action={<div className="home-profile-access"><NavLink to="/eu" className="home-avatar" aria-label="Abrir meu perfil">{avatarSource ? <img src={avatarSource} alt="" /> : <UserRound size={28} />}</NavLink><button ref={avatarEditButton} className="home-avatar-edit" aria-label="Alterar foto do perfil" aria-haspopup="dialog" onClick={() => setAvatarPickerOpen(true)}><PencilLine size={14} /></button></div>} />
+      {avatarPickerOpen && <AvatarPickerSheet current={data.profile.avatar} onClose={closeAvatarPicker} onChoose={async (avatar) => { await saveProfile({ ...data.profile, avatar }); await refresh(); closeAvatarPicker(); setNotice(avatar ? 'Avatar atualizado.' : 'Avatar removido.') }} setNotice={setNotice} />}
       <section className="hero-action">
         <div className="soft-orbit"><Dumbbell size={31} strokeWidth={1.8} /></div>
         <div>
@@ -401,6 +419,7 @@ export function WorkoutPage({ data, refresh, setNotice, allExercises, allTemplat
   const workoutUnit = data.workouts.find(workout => workout.status === 'active')?.loadUnit ?? data.profile.loadUnit
   const active = data.workouts.find((workout) => workout.status === 'active')
   const [pickerOpen, setPickerOpen] = useState(false)
+  const [creatingManual, setCreatingManual] = useState(false)
   const [pickerMode, setPickerMode] = useState<'exercise' | 'template'>('exercise')
   const [query, setQuery] = useState('')
   const [pickerCategory, setPickerCategory] = useState<'all' | 'favorites' | 'strength' | 'activities'>('all')
@@ -479,7 +498,7 @@ export function WorkoutPage({ data, refresh, setNotice, allExercises, allTemplat
   const closePicker = () => { setPickerOpen(false); setQuery('') }
   const toWorkoutItem = (exercise: Exercise): WorkoutItem => ({
     id: makeId(), exerciseId: exercise.id, exerciseName: exercise.name, category: exercise.category, metricMode: exercise.metricMode,
-    metrics: defaultMetricsForMode(exercise.metricMode),
+    metrics: exercise.defaultMetrics ?? defaultMetricsForMode(exercise.metricMode),
     analysis: exercise.analysis,
     sets: [{ id: makeId(), completed: false }],
   })
@@ -690,7 +709,8 @@ export function WorkoutPage({ data, refresh, setNotice, allExercises, allTemplat
 
       <WorkoutGuide workout={active} unit={active.loadUnit ?? workoutUnit} refresh={refresh} onFocus={focusWorkoutItem} onAdd={openPicker} onFinish={askToFinish} />
 
-      {pickerOpen && <div className="sheet-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) closePicker() }}><section className="bottom-sheet exercise-picker-sheet" role="dialog" aria-modal="true" aria-labelledby="picker-title"><div className="sheet-handle" /><header><h2 id="picker-title">Adicionar ao treino</h2><button className="icon-button" aria-label="Fechar" onClick={closePicker}><X /></button></header><div className="picker-tabs" role="tablist" aria-label="O que adicionar"><button role="tab" aria-selected={pickerMode === 'exercise'} className={pickerMode === 'exercise' ? 'selected' : ''} onClick={() => { setPickerMode('exercise'); setQuery('') }}>Exercício</button><button role="tab" aria-selected={pickerMode === 'template'} className={pickerMode === 'template' ? 'selected' : ''} onClick={() => { setPickerMode('template'); setQuery('') }}>Modelo</button></div><label className="search-field"><Search size={19} /><input placeholder={pickerMode === 'exercise' ? 'Buscar exercício ou atividade' : 'Buscar modelo'} value={query} onChange={(event) => setQuery(event.target.value)} /></label>{pickerMode === 'exercise' ? <><div className="picker-category-filter" role="group" aria-label="Filtrar catálogo">{([['all', 'Todos'], ['favorites', 'Favoritos'], ['strength', 'Musculação'], ['activities', 'Cardio e outras']] as const).map(([value, label]) => <button key={value} aria-pressed={pickerCategory === value} onClick={() => setPickerCategory(value)}>{label}</button>)}</div><ProgressiveExerciseList key={JSON.stringify([pickerCategory, query])} exercises={filtered} onAdd={exercise => void addExercise(exercise)} /></> : <div className="picker-list picker-template-list" tabIndex={-1}>{filteredTemplates.map((template) => <button key={template.id} onClick={() => void addTemplate(template)}><span className="template-picker-mark" /><span><strong>{template.name}</strong><small>{template.note}</small><em>{template.exerciseIds.slice(0, 3).map((id) => allExercises.find((exercise) => exercise.id === id)?.name).filter(Boolean).join(' · ')}</em></span><Plus size={19} /></button>)}</div>}</section></div>}
+      {pickerOpen && <div className="sheet-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) closePicker() }}><section className="bottom-sheet exercise-picker-sheet" role="dialog" aria-modal="true" aria-labelledby="picker-title"><div className="sheet-handle" /><header><h2 id="picker-title">Adicionar ao treino</h2><button className="icon-button" aria-label="Fechar" onClick={closePicker}><X /></button></header><div className="picker-tabs" role="tablist" aria-label="O que adicionar"><button role="tab" aria-selected={pickerMode === 'exercise'} className={pickerMode === 'exercise' ? 'selected' : ''} onClick={() => { setPickerMode('exercise'); setQuery('') }}>Exercício</button><button role="tab" aria-selected={pickerMode === 'template'} className={pickerMode === 'template' ? 'selected' : ''} onClick={() => { setPickerMode('template'); setQuery('') }}>Modelo</button></div><label className="search-field"><Search size={19} /><input placeholder={pickerMode === 'exercise' ? 'Buscar exercício ou atividade' : 'Buscar modelo'} value={query} onChange={(event) => setQuery(event.target.value)} /></label>{pickerMode === 'exercise' ? <><div className="picker-category-filter" role="group" aria-label="Filtrar catálogo">{([['all', 'Todos'], ['favorites', 'Favoritos'], ['strength', 'Musculação'], ['activities', 'Cardio e outras']] as const).map(([value, label]) => <button key={value} aria-pressed={pickerCategory === value} onClick={() => setPickerCategory(value)}>{label}</button>)}</div><FloatingAddButton tone="blue" label="Criar exercício manual" onClick={() => setCreatingManual(true)} /><ProgressiveExerciseList key={JSON.stringify([pickerCategory, query])} exercises={filtered} onAdd={exercise => void addExercise(exercise)} /></> : <div className="picker-list picker-template-list" tabIndex={-1}>{filteredTemplates.map((template) => <button key={template.id} onClick={() => void addTemplate(template)}><span className="template-picker-mark" /><span><strong>{template.name}</strong><small>{template.note}</small><em>{template.exerciseIds.slice(0, 3).map((id) => allExercises.find((exercise) => exercise.id === id)?.name).filter(Boolean).join(' · ')}</em></span><Plus size={19} /></button>)}</div>}</section></div>}
+{creatingManual && <ManualExerciseSheet addToWorkout onClose={() => setCreatingManual(false)} onSaved={async exercise => { await addExercise(exercise); await refresh(); setCreatingManual(false); setNotice('Exercício manual criado e adicionado.'); }} />}
       {detailExercise && <ExerciseDetailModal exercise={detailExercise} favorite={data.favorites.includes(detailExercise.id)} onClose={() => setDetailExercise(undefined)} onToggleFavorite={() => void toggleExerciseFavorite(detailExercise.id, data, refresh)} />}
 
       <ConfirmDialog open={pendingFinish.length > 0} title="Ficou exercício pendente" heading="Antes de guardar" cancelLabel="Ir para exercício" onCancel={() => { const pending = active.items.find(item => item.id === pendingFinish[0]?.id); setPendingFinish([]); if (pending) focusWorkoutItem(pending) }} confirmLabel="Finalizar mesmo assim" onClose={() => setPendingFinish([])} onConfirm={() => { setPendingFinish([]); void askToFinish(true) }}>
@@ -1047,34 +1067,15 @@ export function ExercisesPage({ data, refresh, setNotice, allExercises, allTempl
         <div className="filter-row scrollable">{['Todos', 'Favoritos', ...exerciseGroups.filter(value => value !== 'Todos')].map((value) => <button key={value} aria-pressed={group === value} className={group === value ? 'selected' : ''} onClick={() => setGroup(value)}>{value}</button>)}</div>
         <p className="result-count">{filtered.length} {filtered.length === 1 ? 'exercício' : 'exercícios'}</p>
         {!filtered.length && <p className="muted">{group === 'Favoritos' && !query ? 'Marque o coração de um exercício para encontrá-lo aqui.' : 'Nenhum exercício encontrado.'}</p>}
-        <div className="exercise-list">{filtered.map((exercise) => <div className="exercise-list-row" key={exercise.id}><NavLink to={`/exercicios/${exercise.id}`}><ExerciseArtwork exercise={exercise} compact /><span><strong>{exercise.name}</strong><small>{exercise.group} · {exercise.equipment}{exercise.origin === 'custom' ? ' · pessoal' : ''}</small></span></NavLink><button className="icon-button small" aria-label={data.favorites.includes(exercise.id) ? `Desfavoritar ${exercise.name}` : `Favoritar ${exercise.name}`} onClick={() => void toggleFavorite(exercise.id)}><Heart size={19} fill={data.favorites.includes(exercise.id) ? 'currentColor' : 'none'} /></button></div>)}</div>
+        <div className="exercise-list">{filtered.map((exercise) => <div className="exercise-list-row" key={exercise.id}><NavLink to={`/exercicios/${exercise.id}`}><ExerciseArtwork exercise={exercise} compact /><span><strong>{exercise.name}</strong><small>{exercise.group} · {exercise.equipment}{exercise.origin === 'custom' ? ' · Manual' : ''}</small></span></NavLink><button className="icon-button small" aria-label={data.favorites.includes(exercise.id) ? `Desfavoritar ${exercise.name}` : `Favoritar ${exercise.name}`} onClick={() => void toggleFavorite(exercise.id)}><Heart size={19} fill={data.favorites.includes(exercise.id) ? 'currentColor' : 'none'} /></button></div>)}</div>
       </> : <TemplateLibrary templates={allTemplates} exercises={allExercises} data={data} refresh={refresh} />}
       <FloatingAddButton tone="blue" label={librarySection === 'exercises' ? 'Criar exercício pessoal' : 'Criar modelo de treino'} onClick={() => librarySection === 'exercises' ? setCreating(true) : setCreatingTemplate(true)} />
-      {creating && <CustomExerciseSheet onClose={() => setCreating(false)} onSaved={async () => { await refresh(); setCreating(false); setNotice('Exercício pessoal criado.') }} />}
+      {creating && <ManualExerciseSheet onClose={() => setCreating(false)} onSaved={async () => { await refresh(); setCreating(false); setNotice('Exercício manual criado. O envio para revisão acontece quando houver conexão.') }} />}
       {creatingTemplate && <TemplateSheet exercises={allExercises} onClose={() => setCreatingTemplate(false)} onSaved={async () => { await refresh(); setCreatingTemplate(false); setNotice('Modelo pessoal criado.') }} />}
     </div>
   )
 }
 
-function CustomExerciseSheet({ onClose, onSaved }: { onClose: () => void; onSaved: () => Promise<void> }) {
-  const [name, setName] = useState('')
-  const [group, setGroup] = useState('Pernas')
-  const [category, setCategory] = useState<ActivityCategory>('strength')
-  const [metricMode, setMetricMode] = useState<MetricMode>('load-reps')
-  const submit = async (event: FormEvent) => {
-    event.preventDefault(); if (!name.trim()) return
-    await db.customExercises.put({ id: `custom-${makeId()}`, name: name.trim(), aliases: [], group, equipment: 'Personalizado', instructions: ['Registre aqui as observações que funcionam para você.'], origin: 'custom', category, metricMode, visual: category === 'strength' ? 'flow' : 'walk' }); await onSaved()
-  }
-  return <div className="sheet-backdrop"><form className="bottom-sheet" onSubmit={(event) => void submit(event)}>
-    <div className="sheet-handle" />
-    <header><h2>Novo exercício</h2><button type="button" className="icon-button" aria-label="Fechar" onClick={onClose}><X /></button></header>
-    <label className="field"><span>Nome</span><input value={name} onChange={(event) => setName(event.target.value)} placeholder="Ex.: passada no step" /></label>
-    <label className="field"><span>Tipo</span><select value={category} onChange={(event) => { const next = event.target.value as ActivityCategory; setCategory(next); setMetricMode(next === 'strength' ? 'load-reps' : 'time-only') }}><option value="strength">Musculação</option><option value="cardio">Cardio</option><option value="other">Outra atividade</option></select></label>
-    <label className="field"><span>Como registrar</span><select value={metricMode} onChange={(event) => setMetricMode(event.target.value as MetricMode)}>{category === 'strength' ? <><option value="load-reps">Carga e repetições</option><option value="reps-only">Somente repetições</option><option value="time-only">Somente tempo</option></> : <><option value="distance-time">Distância e tempo</option><option value="time-only">Somente tempo</option></>}</select></label>
-    <label className="field"><span>Grupo principal</span><select value={group} onChange={(event) => setGroup(event.target.value)}>{exerciseGroups.filter((value) => value !== 'Todos').map((value) => <option key={value}>{value}</option>)}</select></label>
-    <button className="primary-button wide" disabled={!name.trim()}>Criar exercício</button>
-  </form></div>
-}
 
 function TemplateSheet({ exercises, onClose, onSaved }: { exercises: Exercise[]; onClose: () => void; onSaved: () => Promise<void> }) {
   const [name, setName] = useState('')
@@ -1114,6 +1115,7 @@ function EvolutionPage({ data, allExercises }: { data: AppSnapshot; allExercises
 }
 
 function ProfilePage({ data, refresh, setNotice, installExperience }: SharedProps) {
+  const navigate = useNavigate()
   const { user, signOutAccount, deleteAccount } = useAuth()
   const [profile, setLocalProfile] = useState(data.profile)
   const [pendingBackup, setPendingBackup] = useState<{ data: AppSnapshot }>()
@@ -1195,7 +1197,8 @@ function ProfilePage({ data, refresh, setNotice, installExperience }: SharedProp
   const avatarSource = profileAvatarSource(profile.avatar, import.meta.env.BASE_URL)
   return <>
     <div className="page profile-page">
-      <PageHeader variant="profile" eyebrow="Seu espaço" title="Eu" />
+      <button className="profile-back" onClick={() => navigate('/')}><ArrowLeft size={18} /> Início</button>
+      <PageHeader variant="profile" eyebrow="Seu espaço" title="Meu perfil" />
       <section className="profile-intro">
         <button className="avatar-soft" aria-label="Escolher avatar do perfil" onClick={() => setAvatarPickerOpen(true)}>{avatarSource ? <img src={avatarSource} alt="Avatar escolhido" /> : <UserRound />}<span className="avatar-edit" aria-hidden="true"><PencilLine size={13} /></span></button>
         <label><span>Como quer ser chamada?</span><input value={profile.nickname} placeholder="Seu apelido" onBlur={() => void persistProfile(profile)} onChange={(event) => setLocalProfile({ ...profile, nickname: event.target.value })} /></label>
@@ -1383,10 +1386,18 @@ function WorkoutRestHistory({ workout }: { workout: Workout }) {
   return <details className="rest-history"><summary>{workout.rests.length} descansos · {formatTimer(total)} no total</summary><ol>{workout.rests.map(rest => <li key={rest.id}><strong>{rest.exerciseName}</strong><small>{formatTime(rest.startedAt)} · Previsto {formatTimer(rest.plannedSeconds)} · Realizado {formatTimer(rest.actualSeconds ?? 0)} · {rest.outcome === 'completed' ? 'Concluído' : rest.outcome === 'interrupted' ? 'Encerrado antes' : 'Em andamento'}</small></li>)}</ol></details>
 }
 
+function PanelinhaPage() {
+  return <div className="page panelinha-page"><PageHeader variant="panelinha" title="Panelinha" /><section className="panelinha-empty"><PanelinhaIcon size={36} /><h2>Em breve, por aqui</h2><p>A Panelinha está em preparação.</p></section></div>
+}
+
+function PanelinhaIcon({ size = 21 }: { size?: number }) {
+  return <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><circle cx="12" cy="6" r="2.5" /><circle cx="4.5" cy="9" r="2" /><circle cx="19.5" cy="9" r="2" /><path d="M7.5 21v-4a4.5 4.5 0 0 1 9 0v4M1 19v-2.5a3.5 3.5 0 0 1 4.5-3.35M23 19v-2.5a3.5 3.5 0 0 0-4.5-3.35" /></svg>
+}
+
 function BottomNav() {
   const items = [
     { to: '/', label: 'Início', icon: Home }, { to: '/linha', label: 'Linha', icon: TimelinePathIcon },
-    { to: '/exercicios', label: 'Biblioteca', icon: BookOpen }, { to: '/evolucao', label: 'Evolução', icon: BarChart3 }, { to: '/eu', label: 'Eu', icon: UserRound },
+    { to: '/exercicios', label: 'Biblioteca', icon: BookOpen }, { to: '/evolucao', label: 'Evolução', icon: BarChart3 }, { to: '/panelinha', label: 'Panelinha', icon: PanelinhaIcon },
   ]
   return <nav className="bottom-nav" aria-label="Navegação principal">{items.map(({ to, label, icon: Icon }) => <NavLink key={to} to={to} end={to === '/'}><Icon size={21} /><span>{label}</span></NavLink>)}</nav>
 }

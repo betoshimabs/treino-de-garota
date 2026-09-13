@@ -52,6 +52,7 @@ export interface ExerciseCuration {
 }
 
 export interface Exercise {
+  defaultMetrics?: WorkoutMetric[]
   id: string
   name: string
   aliases: string[]

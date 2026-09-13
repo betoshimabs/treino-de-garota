@@ -21,7 +21,7 @@ export function TemplateLibrary({ templates, exercises, data, refresh }: { templ
         const selected = template.exerciseIds.map(id => exercises.find(exercise => exercise.id === id)).filter((exercise): exercise is Exercise => !!exercise)
         if (!selected.length) throw new Error('Este modelo não tem exercícios disponíveis. Você pode criar um modelo pessoal.')
         const workout: Workout = { id: crypto.randomUUID(), title: 'Treino de hoje', titleMode: 'auto', status: 'active', startedAt: new Date().toISOString(), timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone, sourceTemplateId: template.id, restSeconds: 90, loadUnit: data.profile.loadUnit,
-          items: selected.map(exercise => ({ id: crypto.randomUUID(), exerciseId: exercise.id, exerciseName: exercise.name, category: exercise.category, metricMode: exercise.metricMode, metrics: defaultMetricsForMode(exercise.metricMode), analysis: exercise.analysis, sets: [{ id: crypto.randomUUID(), completed: false }] })) }
+          items: selected.map(exercise => ({ id: crypto.randomUUID(), exerciseId: exercise.id, exerciseName: exercise.name, category: exercise.category, metricMode: exercise.metricMode, metrics: exercise.defaultMetrics ?? defaultMetricsForMode(exercise.metricMode), analysis: exercise.analysis, sets: [{ id: crypto.randomUUID(), completed: false }] })) }
         await db.workouts.add(workout)
       })
       await refresh(); navigate('/treino/ativo')

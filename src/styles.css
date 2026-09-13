@@ -48,7 +48,22 @@ h2 { font-size: 1.35rem; line-height: 1.05; }
 .page-header > div { min-width: 0; }
 .page-header.header-home h1 { max-width: 12ch; font-size: clamp(2.15rem, 8.8vw, 2.95rem); line-height: .95; }
 @keyframes header-ribbon-arrive { from { transform: translate3d(var(--ribbon-from, 0%), 0, 0); } to { transform: translate3d(var(--ribbon-x, 0%), 0, 0); } }
-.date-stamp { font-family: 'Gabarito Variable'; font-size: .92rem; white-space: nowrap; background: rgba(255, 253, 248, .72); padding: 7px 11px; border-radius: 12px 9px 13px 8px; transform: rotate(2deg); }
+.home-greeting { display: flex; align-items: baseline; flex-wrap: wrap; gap: 4px 10px; }
+.home-greeting time { font-weight: 500; letter-spacing: 0; white-space: nowrap; }
+.home-profile-access { --home-avatar-size: min(180px, 46vw); flex: 0 0 var(--home-avatar-size); width: var(--home-avatar-size); height: calc(var(--home-avatar-size) + 8px); }
+.home-avatar { display: grid; place-items: center; width: var(--home-avatar-size); height: var(--home-avatar-size); border-radius: 50%; overflow: hidden; background: var(--white); color: var(--ink); }
+.home-avatar > svg { width: 48%; height: 48%; }
+.header-home { align-items: center; }
+.page-header.header-home h1 { font-size: clamp(1.6rem, 7vw, 2.95rem); overflow-wrap: break-word; }
+.home-avatar img { width: 100%; height: 100%; object-fit: cover; }
+.home-avatar-edit { position: absolute; right: 4px; bottom: 8px; width: 44px; height: 44px; border-radius: 50%; display: grid; place-items: center; background: transparent; }
+.home-avatar-edit::before { content: ''; position: absolute; inset: 7px; border-radius: 50%; background: var(--white); border: 2px solid var(--pink-paper); }
+.home-avatar-edit svg { position: relative; }
+.profile-back { display: inline-flex; align-items: center; gap: 8px; min-height: 44px; margin: -12px 0 12px; padding: 0; background: transparent; }
+.panelinha-empty { text-align: center; padding: 64px 12px; }
+.panelinha-empty > svg { color: var(--muted); margin-bottom: 20px; }
+.panelinha-empty h2 { margin-bottom: 10px; }
+.panelinha-empty p { color: var(--muted); }
 
 .icon-button { min-width: 44px; min-height: 44px; display: inline-grid; place-items: center; background: transparent; border-radius: 50%; }
 .icon-button.small { min-width: 38px; min-height: 38px; color: var(--muted); }
@@ -847,3 +862,23 @@ h2 { font-size: 1.35rem; line-height: 1.05; }
   .page-header-ribbon { animation: none; }
   .training-mode .workout-topbar::before { animation: none; clip-path: none; }
 }
+.manual-exercise-dialog fieldset { border: 0; padding: 0; margin: 0; min-width: 0; }
+.manual-exercise-dialog .field { margin-bottom: 18px; }
+.manual-exercise-dialog textarea { width: 100%; resize: vertical; }
+.manual-actions { display: flex; gap: 10px; margin-top: 22px; }
+.manual-actions > button { flex: 1; min-height: 48px; }
+.manual-badge { display: inline-block; padding: 3px 8px; border-radius: 999px; background: var(--pink-paper); color: var(--ink); font-size: .7rem; font-weight: 700; vertical-align: middle; }
+.manual-create-entry { display: flex; align-items: center; justify-content: center; gap: 8px; min-height: 44px; background: var(--pool); border-radius: 12px; margin-bottom: 10px; flex-shrink: 0; }
+.exercise-picker-sheet { position: relative; }
+.exercise-picker-sheet .floating-add { position: absolute; bottom: calc(20px + env(safe-area-inset-bottom)); right: 24px; z-index: 2; }
+.exercise-picker-sheet .picker-list { padding-bottom: 88px; }
+.manual-exercise-dialog .manual-metric-options { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; margin-bottom: 22px; }
+.manual-metric-options legend { font-size: .8rem; font-weight: 700; margin-bottom: 10px; }
+.manual-metric-options legend small { font-weight: 400; color: var(--muted); }
+.manual-metric-options label { display: flex; align-items: center; gap: 8px; min-height: 44px; border-radius: 999px; background: var(--white); padding: 8px 12px; font-size: .85rem; cursor: pointer; }
+.manual-metric-options label:has(input:checked) { background: var(--pool); }
+.manual-metric-options input { accent-color: var(--ink); width: 17px; height: 17px; }
+.manual-discard > p { margin: 0; color: var(--muted); }
+.manual-discard-actions { display: grid; gap: 12px; margin-top: 24px; }
+.manual-discard-actions button { min-height: 48px; }
+.manual-discard-button { background: transparent; color: var(--ink); border: 1px solid var(--line); border-radius: 14px; font-weight: 700; padding: 12px 16px; }

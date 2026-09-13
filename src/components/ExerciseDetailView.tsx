@@ -3,6 +3,7 @@ import { ArrowLeft, ChevronDown, Heart, Info, X } from 'lucide-react'
 import type { Exercise } from '../types'
 import { ExerciseArtwork } from './ExerciseVisual'
 import { MuscleMap } from './MuscleMap'
+import { ManualSubmissionStatus } from './ManualSubmissionStatus'
 
 type DetailProps = { exercise: Exercise; favorite: boolean; onToggleFavorite: () => void; onClose: () => void; modal?: boolean }
 
@@ -17,6 +18,8 @@ export function ExerciseDetailView({ exercise, favorite, onToggleFavorite, onClo
       </header>
       <p className="eyebrow">{exercise.group} · {exercise.equipment}</p>
       <h1 id={titleId}>{exercise.name}</h1>
+      {exercise.origin === 'custom' && <p><span className="manual-badge">Manual</span> <small>Cadastro pessoal, sem validação profissional.</small></p>}
+      {exercise.origin === 'custom' && <ManualSubmissionStatus exerciseId={exercise.id} />}
       <div className={`detail-illustration${exercise.media ? ' has-media' : ''}`}>
         <ExerciseArtwork exercise={exercise} />
         <small>{exercise.analysis?.kind === 'session' ? 'Cena representativa da atividade' : exercise.media ? 'Início e execução' : 'Ilustração demonstrativa em preparação'}</small>

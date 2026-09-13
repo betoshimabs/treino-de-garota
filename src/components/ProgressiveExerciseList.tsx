@@ -24,7 +24,7 @@ export function ProgressiveExerciseList({ exercises, onAdd }: { exercises: Exerc
   }, [shown, hasMore])
 
   return <div className="picker-list" ref={list} tabIndex={-1}>
-    {exercises.slice(0, shown).map(exercise => <button key={exercise.id} onClick={() => onAdd(exercise)}><ExerciseArtwork exercise={exercise} compact /><span><strong>{exercise.name}</strong><small>{exercise.group} · {exercise.equipment}</small></span><Plus size={19} /></button>)}
+    {exercises.slice(0, shown).map(exercise => <button key={exercise.id} onClick={() => onAdd(exercise)}><ExerciseArtwork exercise={exercise} compact /><span><strong>{exercise.name} {exercise.origin === 'custom' && <span className="manual-badge">Manual</span>}</strong><small>{exercise.group} · {exercise.equipment}</small></span><Plus size={19} /></button>)}
     {!exercises.length && <p className="muted">Nenhum exercício encontrado.</p>}
     {hasMore && <button ref={more} className="picker-load-more" onClick={() => setLimit(current => current + PAGE_SIZE)}>Mostrar mais {Math.min(PAGE_SIZE, exercises.length - shown)}</button>}
     <p className="picker-result-count" role="status" aria-live="polite">{shown} de {exercises.length} exercícios e atividades{!hasMore && exercises.length > 0 ? ' · Fim da lista' : ''}</p>

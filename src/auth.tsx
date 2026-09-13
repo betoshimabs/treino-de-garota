@@ -17,6 +17,7 @@ import {
 import { ArrowLeft, ArrowRight, Check, Eye, EyeOff, LogIn, Mail, RotateCcw } from 'lucide-react'
 import { BrandLoading, useOpeningReady } from './components/BrandLoading'
 import { auth, authPersistenceReady } from './firebase'
+import { deleteManualSubmissions } from './manual-exercises'
 import {
   deleteDatabaseForUser,
   importLegacyDataForCurrentUser,
@@ -100,6 +101,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       const currentUser = auth.currentUser
       if (!currentUser) return
       const userId = currentUser.uid
+      await deleteManualSubmissions()
       await deleteUser(currentUser)
       await deleteDatabaseForUser(userId)
     },

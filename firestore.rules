@@ -1,0 +1,28 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    match /users/{uid}/exerciseSubmissions/{id} {
+      function owner() { return request.auth != null && request.auth.uid == uid; }
+      function validExercise(e) {
+        return e.keys().hasAll(['name', 'equipment', 'category', 'metricMode', 'group', 'description'])
+          && e.keys().hasOnly(['name', 'equipment', 'category', 'metricMode', 'group', 'description', 'defaultMetrics'])
+          && (!('defaultMetrics' in e) || (e.defaultMetrics is list && e.defaultMetrics.size() >= 1 && e.defaultMetrics.size() <= 4 && e.defaultMetrics.toSet().size() == e.defaultMetrics.size() && e.defaultMetrics.hasOnly(['load', 'reps', 'distance', 'duration'])))
+          && e.name is string && e.name.size() >= 2 && e.name.size() <= 100
+          && e.equipment is string && e.equipment.size() <= 100
+          && e.description is string && e.description.size() <= 600
+          && e.category in ['strength', 'cardio', 'other']
+          && e.metricMode in ['load-reps', 'reps-only', 'distance-time', 'time-only']
+          && e.group in ['Peito', 'Costas', 'Ombros', 'Braços', 'Core', 'Glúteos', 'Pernas', 'Corpo inteiro', 'Cardio', 'Outras'];
+      }
+      allow read, delete: if owner();
+      allow create: if owner() && id.matches('custom-[a-zA-Z0-9-]{1,64}')
+        && request.resource.data.keys().hasAll(['exercise', 'status', 'createdAt'])
+        && request.resource.data.keys().hasOnly(['exercise', 'status', 'createdAt'])
+        && request.resource.data.status == 'pending'
+        && request.resource.data.createdAt == request.time
+        && validExercise(request.resource.data.exercise);
+      // Review/publication is administrative only; never editable by the client.
+      allow update: if false;
+    }
+  }
+}
