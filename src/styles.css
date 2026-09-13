@@ -882,3 +882,13 @@ h2 { font-size: 1.35rem; line-height: 1.05; }
 .manual-discard-actions { display: grid; gap: 12px; margin-top: 24px; }
 .manual-discard-actions button { min-height: 48px; }
 .manual-discard-button { background: transparent; color: var(--ink); border: 1px solid var(--line); border-radius: 14px; font-weight: 700; padding: 12px 16px; }
+.platform-select-trigger { display: flex; align-items: center; justify-content: space-between; gap: 12px; width: 100%; min-height: 50px; padding: 12px 14px; border: 1px solid var(--line); border-radius: 14px; background: var(--white); text-align: left; color: var(--ink); }
+.platform-select-options { display: grid; gap: 8px; }
+.platform-select-options > button { min-height: 48px; display: flex; align-items: center; justify-content: space-between; gap: 12px; text-align: left; border-radius: 12px; padding: 12px 14px; background: var(--white); }
+.platform-select-options > button[aria-pressed=true] { background: var(--pool); font-weight: 700; }
+.manual-similar { margin: 0 0 22px; padding: 16px 0; border-block: 1px solid var(--line); }
+.manual-similar > p { margin: 0 0 12px; font-weight: 700; }
+.manual-similar-exercise { display: flex; align-items: center; gap: 12px; }
+.manual-similar-exercise small { display: block; color: var(--muted); margin-top: 4px; }
+.manual-similar-actions { display: flex; gap: 10px; margin-top: 14px; }
+.manual-similar-actions button { flex: 1; min-height: 44px; }
